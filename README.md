@@ -2,7 +2,7 @@
 
 A bot that executes written test cases in a browser and reports a verdict with evidence. The design is in [docs/manual/](docs/manual/00-index.md), and the build plan is in [docs/build-brief.md](docs/build-brief.md).
 
-**Status: milestone M1 (the thin slice).** It runs one case against a local fixture site with a *scripted fake model*. No API key, no cost, and no real application is involved. The live model, sessions and secrets, the judge, the report, and frozen scripts come in later milestones.
+**Status: milestones M1 (the thin slice) and M2 (sessions, secrets, scrubbing, budgets) are built.** The bot runs cases against a local fixture site with a *scripted fake model*. No API key, no cost, and no real application is involved. The live model, the judge, network-level mutation blocking, the golden set, the final report, and frozen scripts come in later milestones.
 
 ## Run it
 
@@ -31,22 +31,35 @@ Fixture defects you can turn on with `--defects`: `lockout-off-by-one`, `email-c
 
 If the negative control ever reports PASS, the bot is broken. Stop and fix it before trusting any other result.
 
-## What M1 does not do yet
+## What is not built yet
 
 The manual describes the finished bot, and some of it is not built. Do not rely on these until their milestone:
 
 - `allowed_mutations` in a case is read but **not enforced** (M4).
-- `role`, `data` and secret references are read but not used (M2). There are no stored sessions and no `fill_secret` yet.
-- There are no time or cost budgets and no loop detection, only a hard cap on tool calls (M2).
-- There is no judge, so a `judged` expected result always gives NO_EVIDENCE (M3).
-- The only model is the scripted fake. No live model has been run.
+- There is no judge, so a `judged` expected result always gives NO_EVIDENCE (M3). There are no implicit checks (console errors and so on) either.
+- There is no pre-flight check and no kill switch (M4). The secret manager is an environment-variable store, and the real one is a decision still open.
+- The only model is the scripted fake. No live model has been run, so the cost figures are computed from usage that the test scripts invent.
+- Sessions are made through the application's login API. A UI or single-sign-on login is not built.
 
-The review of what M1 does and does not do is in [docs/m1-review.md](docs/m1-review.md).
+Reviews: [docs/m1-review.md](docs/m1-review.md), [docs/m2-review.md](docs/m2-review.md) (read its list of residual risks, for example secrets shown as page text still appear in screenshots), and [docs/security-hardening.md](docs/security-hardening.md).
 
-## What M1 proves
+## What M2 added
+
+- **Roles and sessions.** A case with `role: member` starts the browser already signed in. The runner logs in through the login API, per case, keeps the session file outside the run folder, and deletes it afterwards.
+- **`fill_secret`.** A case declares a secret as `secret:<name>` in `data`. The model names the data key, and the tool layer fills the field without ever returning the value. Try `npm run run-case -- cases/TC-AUTH-004.yaml`.
+- **Scrubbing.** Everything the model is shown and everything stored is scrubbed of secrets, session tokens and credential headers. Screenshots cover password fields. The HAR is scrubbed, and there are no Playwright traces. A final scan of the stored files fails closed.
+- **Budgets and loop detection.** Tool calls, time and cost have limits, and a run that hits one is INCOMPLETE. The same action failing 3 times in a row (or repeated 8 times) is BLOCKED. Limits are in `config/default.json`.
+- **Run record v1** with the session, budget, redaction and scan sections. The CLI prints budget and scrub lines.
+
+Check that nothing leaked, after any run: `Select-String -Path (Get-ChildItem runs -Recurse -File).FullName -Pattern "Correct#Pass1","Member#Pass-2026" -SimpleMatch` finds nothing.
+
+## What the tests prove
 
 | Test | Rule | File |
 | --- | --- | --- |
+| T2 | Credentials never reach the model or the artifacts | `tests/ci/credentials.test.ts`, `tests/ci/fill-secret.test.ts` |
+| T3 | A budget cutoff is INCOMPLETE | `tests/ci/budget.test.ts` |
+| T4 | Loops stop (BLOCKED) | `tests/ci/loop.test.ts` |
 | T1 | The allowlist is enforced in the tool layer (goto, links, redirects, popups, iframes, websockets, file: data: javascript:) | `tests/ci/allowlist.test.ts` |
 | T5 | No PASS without runner-captured evidence | `tests/ci/oracle.test.ts` |
 | T6 | A wrong expected result fails | `tests/ci/oracle.test.ts` |

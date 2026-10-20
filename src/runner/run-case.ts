@@ -213,6 +213,7 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
   const outcomes = loop?.outcomes ?? [];
   const runState = {
     actor_stop_reason: loop?.actorStop?.reason ?? null,
+    stop_source: loop?.stopSource ?? null,
     runner_stop_reason: runnerStopOverride ?? loop?.runnerStop ?? null,
     infrastructure_failure: infrastructureFailure,
     guardrail_block: loop?.guardrailBlock ?? false,
@@ -230,7 +231,7 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
   });
 
   const record: RunRecord = RunRecordSchema.parse({
-    schema_version: 0,
+    schema_version: 1,
     run_id: runId,
     case: { id: testCase.id, title: testCase.title, priority: testCase.priority, source: options.caseSource },
     started_at: startedAt,
@@ -257,6 +258,23 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
     evidence: [...(sink?.all() ?? [])],
     guardrail_events: access ? [...access.guardrails.events] : [],
     cleanup_errors: cleanupErrors,
+    session: { role: testCase.role, mode: config.sessions.mode, established: session !== null },
+    budget: {
+      limits: {
+        max_tool_calls_per_run: config.budgets.maxToolCallsPerRun,
+        max_tool_calls_per_step: config.budgets.maxToolCallsPerStep,
+        max_wall_ms: config.budgets.maxWallMs,
+        max_cost_usd: config.budgets.maxCostUsd,
+      },
+      used: loop?.budget ?? { tool_calls: 0, wall_ms: 0, cost_usd: 0, input_tokens: 0, output_tokens: 0 },
+      stop: loop?.budgetStop ?? null,
+    },
+    redaction: { secrets_tracked: redactor.secretCount, replacements: redactor.replacements },
+    artifact_scan: { files_scanned: scan.filesScanned, findings: scan.findings.length, cleaned: scan.findings.length > 0 },
+    artifacts: {
+      har: existsSync(join(runDir, "network.har")) ? "network.har" : null,
+      model_context: existsSync(join(runDir, "model-context.jsonl")) ? "model-context.jsonl" : null,
+    },
     run_state: runState,
     verdict,
     verdict_row: row,

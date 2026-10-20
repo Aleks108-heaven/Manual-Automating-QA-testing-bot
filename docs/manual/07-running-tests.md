@@ -17,7 +17,8 @@ Run scripted cases on demand, on release candidates, and on a schedule, and use 
 
 - Each case runs in a fresh browser context with its own seeded data and its role's stored session.
 - The pre-flight check must pass first: the provider is reachable, quota is left, secrets are valid, each role's stored session is fresh, the runner image matches the pinned one, staging is healthy, the build is the expected one, and the canary cases pass. Otherwise the run does not start.
-- Every run has budgets for steps, time, and cost: [to fill: limits]. A run cut off by a budget is INCOMPLETE, never PASS.
+- Every run has budgets for tool calls (per step and per run), wall-clock time, and cost: [to fill: limits, set in configuration]. A run cut off by a budget is INCOMPLETE, never PASS. The time budget also covers a model that never answers. Cost comes from the token usage the model client reports and the prices in configuration. When a model call uses up the budget, the action it chose is not carried out. Each report records the limits, what was used, and which limit ended the run.
+- A run that repeats itself is stopped by the runner, not left to the model. The same action (the same tool with the same arguments) failing 3 times in a row, or the same action repeated 8 times in a row even if it succeeds, ends the run with the stop reason `loop`, which gives BLOCKED. Both limits are configuration. The model is not asked for a final report after such a stop.
 - During the pilot each case runs three times, to measure repeatability.
 - Do not run performance tests on staging while bot runs share it.
 

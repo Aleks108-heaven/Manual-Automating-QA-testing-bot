@@ -113,7 +113,9 @@ teardown:
   - call: POST /__test/reset
 ```
 
-Case files live in `cases/`, one YAML file per case, named after the case ID. The working examples are `cases/TC-FORM-001.yaml` and `cases/TC-AUTH-003.yaml`. Secrets are not available before milestone M2, so the lockout case above is the design target and the boundary pair TC-AUTH-003 is the first one that runs.
+Case files live in `cases/`, one YAML file per case, named after the case ID. The working examples are `cases/TC-FORM-001.yaml`, `cases/TC-AUTH-003.yaml`, the lockout case above as `cases/TC-AUTH-004.yaml`, and `cases/TC-ACCT-001.yaml`, which runs as the role `member` with no login steps.
+
+**Roles and secrets.** `role` names a role from the bot's configuration, or `none`. For a role, the runner logs in before the case starts and gives the browser that session, so the model never sees a login, a credential, or a session token. A secret in `data` is written as a reference, `secret:<name>`, and the model uses it only through `fill_secret`, naming the `data` key (the step text says "using fill_secret"). The runner looks the value up in the secret store and never shows it to the model. A `data` entry that is not a secret reference can be typed with a plain fill.
 
 **How the runner checks expected results.** After each step the runner waits until the network has been quiet for a short time, then evaluates the entries whose `after_step` is that step, in the order written. A check passes as soon as it holds, so a message that appears briefly is caught. A `count` must keep holding for a short moment, so "nothing is there" is not read before a response has arrived. A check that never holds waits out the timeout and gives MISMATCH, so a case with a failing expected result takes longer to run. The timeouts are configuration.
 

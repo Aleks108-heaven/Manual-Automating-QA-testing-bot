@@ -50,14 +50,18 @@ function printSummary(record: RunRecord, runDir: string, note: string | null): v
   line(`Target   ${record.target}  build ${record.versions.build ?? "unknown"}`);
   line(`Versions model client ${record.versions.model_client}, Playwright ${record.versions.playwright}, browser ${record.versions.browser}`);
   if (!record.versions.browser_sandbox) line("WARNING  the browser sandbox was OFF for this run. Use that only inside an isolating container.");
+  const b = record.budget;
+  line(`Budget   ${b.used.tool_calls} of ${b.limits.max_tool_calls_per_run} tool calls, ${(b.used.wall_ms / 1000).toFixed(1)} s of ${b.limits.max_wall_ms / 1000} s, cost ${b.used.cost_usd.toFixed(4)} of ${b.limits.max_cost_usd} USD`);
+  line(`Session  role ${record.session.role}${record.session.role === "none" ? " (no login)" : ", signed in by the runner"}`);
+  line(`Secrets  ${record.redaction.secrets_tracked} tracked, ${record.redaction.replacements} replacements, artifact scan ${record.artifact_scan.findings === 0 ? "clean" : `FOUND ${record.artifact_scan.findings} (cleaned)`} over ${record.artifact_scan.files_scanned} files`);
   line();
   line(`Verdict: ${record.verdict}  (precedence row ${record.verdict_row})`);
   for (const o of record.outcomes) {
     line(`  ${o.expected_ref.padEnd(4)} ${o.outcome.padEnd(11)} ${o.expected}${o.outcome === "MATCH" ? "" : `   actual: ${o.actual ?? "n/a"}`}`);
   }
   if (record.outcomes.length === 0) line("  (no expected result was evaluated)");
-  if (record.run_state.actor_stop_reason) line(`  Stopped: the actor reported ${record.run_state.actor_stop_reason}`);
-  if (record.run_state.runner_stop_reason) line(`  Stopped: the runner reported ${record.run_state.runner_stop_reason}`);
+  if (record.run_state.actor_stop_reason) line(`  Stopped: ${record.run_state.stop_source === "runner" ? "the runner's loop detection" : "the actor"} reported ${record.run_state.actor_stop_reason}`);
+  if (record.run_state.runner_stop_reason) line(`  Stopped: the runner reported ${record.run_state.runner_stop_reason}${record.budget.stop ? ` (${record.budget.stop.detail})` : ""}`);
   if (record.run_state.infrastructure_failure) line(`  Infrastructure: ${record.run_state.infrastructure_failure}`);
   for (const e of record.guardrail_events.filter((g) => g.decision === "blocked")) line(`  Guardrail blocked ${e.type}: ${e.url} (${e.detail})`);
   for (const c of record.cleanup_errors) line(`  Cleanup: ${c}`);

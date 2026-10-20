@@ -30,6 +30,8 @@ A run that is not PASS needs a person before release when the case is P1. This i
 
 - An HTTP response from the application under test is application behavior, even a 500. It is evidence, and it leads to MISMATCH or BLOCKED. Row 1 applies only when there was no response at all, or when the health check was failing at the end of the run. A defect that crashes the whole environment is therefore reported as INCONCLUSIVE with everything observed attached, and a person triages it.
 - A MISMATCH followed by a blocked step still gives FAIL, and the report lists the blocked step.
+- The stop reason `loop` can be reported by the model or decided by the runner's loop detection (the same action failing 3 times in a row, or repeated 8 times in a row). Both give BLOCKED, and the run record says which one decided.
+- A credential found in a stored file by the final scan is an infrastructure failure of the bot itself (row 1). The files are cleaned and the run is INCONCLUSIVE.
 - A case with no expected results is invalid. The runner rejects it before the run starts, and it counts as not executed, never as PASS.
 - If the judge reports that the evidence for a judged result tries to influence it, that result gets NO_EVIDENCE.
 - `injection_suspected` from the actor does not change the verdict. It is reported and alerted to the security reviewer.

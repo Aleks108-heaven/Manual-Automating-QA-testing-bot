@@ -7,7 +7,7 @@ This pack is what the bot reads. It is version-pinned, reviewed like code, and m
 - Actor: [prompts/actor.v1.md](../../prompts/actor.v1.md)
 - Judge: [prompts/judge.v1.md](../../prompts/judge.v1.md)
 
-This page does not repeat them. Who decides a verdict, the precedence table, and the stop-reason mapping live on the Definitions page. The actor's stop reasons are element_missing, step_ambiguous, and loop, and budget, timeout, and crash stops come from the runner.
+This page does not repeat them. Who decides a verdict, the precedence table, and the stop-reason mapping live on the Definitions page. The actor's stop reasons are element_missing, step_ambiguous, and loop, and budget, timeout, and crash stops come from the runner. The runner also detects loops itself and does not wait for the model to report them.
 
 **Handling rules**
 

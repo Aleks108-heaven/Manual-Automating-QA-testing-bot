@@ -33,6 +33,18 @@ describe("CLI", () => {
     expect(r.out).toContain("1 not verified");
   });
 
+  it("runs the login case with fill_secret and the stored-session case, and reports budget and scan", () => {
+    const login = cli(["cases/TC-AUTH-004.yaml"]);
+    expect(login.code).toBe(0);
+    expect(login.out).toMatch(/Budget\s+6 of 60 tool calls/);
+    expect(login.out).toContain("artifact scan clean");
+    expect(login.out).not.toContain("Correct#Pass1");
+    const member = cli(["cases/TC-ACCT-001.yaml"]);
+    expect(member.code).toBe(0);
+    expect(member.out).toContain("role member, signed in by the runner");
+    expect(member.out).not.toContain("Member#Pass-2026");
+  });
+
   it("never says all tests passed", () => {
     for (const args of [["cases/TC-FORM-001.yaml"], ["cases/TC-FORM-001.yaml", "--negative-control"]]) {
       expect(cli(args).out.toLowerCase()).not.toContain("all tests passed");

@@ -20,8 +20,8 @@ Method: re-read the tool layer, runner, oracle, agent loop, fixture, and CLI aga
 | # | Finding | Why it is open |
 | --- | --- | --- |
 | O1 | `allowed_mutations` is read from the case but **not enforced yet**. The manual describes the target behavior (undeclared state-changing requests are blocked) | It is milestone M4 (T16). Until then, a case's declaration has no effect, so do not rely on it |
-| O2 | `role` and `data` are read but unused | Sessions and secret references are milestone M2 |
-| O3 | Only hard caps on tool calls exist. There is no time or cost budget and no loop detection | Milestone M2 (T3, T4) |
+| O2 | `role` and `data` are read but unused | **Closed in M2:** roles, per-case sessions, and `fill_secret` |
+| O3 | Only hard caps on tool calls exist. There is no time or cost budget and no loop detection | **Closed in M2:** budgets for tool calls, time and cost, and runner-side loop detection (T3, T4) |
 | O4 | `settle()` counts requests in flight. A long-polling page makes it wait the full 2 seconds after every step | Slower, never wrong. Revisit with a real application |
 | O5 | If an unrelated request is blocked while a tool call is running, a genuine tool error (for example `element_missing`) is reported as `blocked_by_guardrail` | The run stops on any block anyway, so the verdict is the same. The log still shows both events |
 | O6 | A popup that opens late can become the current page after the next tool call has started | Low risk on the fixture. Needs a real popup test in M4 |

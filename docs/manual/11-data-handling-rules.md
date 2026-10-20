@@ -32,10 +32,19 @@ A standby provider for failover needs its own review before it is ever used.
 | Bot logs | Prompts, outputs, tool calls | [to fill], redacted |
 | Versions and config | Model ID, prompt hash, rubric, browser, app build | Kept with the release record |
 
+**What a run stores, and how it is scrubbed.** Version 1 of the bot stores, per run: the run record, screenshots, page snapshots and network logs captured at each expected-result check, a HAR file, and a transcript of everything the model was shown. Playwright traces are not recorded, because a trace archive holds page snapshots, headers and request bodies and cannot be scrubbed reliably. A trace may be added only together with a scrubber that is tested as hard as the HAR one. Every file is scrubbed as it is written:
+
+- Secrets the case declares, the role's password, and every session cookie value are replaced everywhere they appear, in their raw, URL-encoded, JSON-escaped, base64 and HTML-escaped forms.
+- Cookie, Set-Cookie, Authorization, API-key and similar headers are redacted in the HAR, and so are request bodies, query parameters and URLs that carry credentials.
+- Screenshots cover password inputs and every field filled with `fill_secret`.
+- A scan of all stored files runs last. A finding means the scrubber has a defect: the files are cleaned, the run is INCONCLUSIVE, and a person looks at it.
+
+Known limits: the scrubber removes only what it has been told about (the case's secrets, the role's password, its session cookies), so a value the application invents and displays, such as a one-time code, is not removed. A secret displayed as plain page text is not removed from screenshot pixels. Treat screenshots of pages that display secrets as sensitive evidence (see the M2 review).
+
 **Rules**
 
 - Redact before long-term storage.
 - Credentials never appear in prompts or evidence.
-- Scrub traces and HAR files before sharing them.
+- Scrub traces and HAR files before sharing them. In version 1 the HAR is scrubbed when it is written, and there are no traces.
 - Delete at the end of the retention period, with a legal-hold override.
 - Which rules apply depends on where your users and data are, so ask compliance before the pilot.
