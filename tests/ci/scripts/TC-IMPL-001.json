@@ -1,0 +1,5 @@
+{
+  "case_id": "TC-IMPL-001",
+  "steps": [[{ "tool": "goto", "args": { "url": "/implicit" } }]],
+  "observations": [{ "expected_ref": "e1", "observed": "Implicit findings", "evidence": [] }]
+}

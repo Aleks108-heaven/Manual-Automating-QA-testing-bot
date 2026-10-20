@@ -19,6 +19,12 @@ const ConfigSchema = z.strictObject({
   }),
   // Price per million tokens. Fixture placeholders: the real values depend on the provider, which is still [to fill].
   pricing: z.strictObject({ inputPerMTok: z.number().min(0), outputPerMTok: z.number().min(0) }),
+  // Implicit checks need no expected result. In version 1 they are reported with the verdict and never change it.
+  implicit: z.strictObject({
+    enabled: z.boolean(),
+    accessibility: z.boolean(),
+    maxFindings: z.number().int().min(1),
+  }),
   // How many times the judge is asked when its answer fails validation.
   judge: z.strictObject({ maxAttempts: z.number().int().min(1).max(10) }),
   // How many times the model is asked for its final report when the report fails validation.

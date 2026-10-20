@@ -123,6 +123,29 @@ export const RunRecordSchema = z.strictObject({
       evidence: z.array(z.string()),
     })
     .nullable(),
+  // Implicit findings: reported with the verdict, never part of it (manual: Definitions).
+  implicit: z.strictObject({
+    enabled: z.boolean(),
+    findings: z.array(
+      z.strictObject({
+        kind: z.enum(["console_error", "http_error", "failed_request", "broken_image", "accessibility"]),
+        step: z.number().int().min(1),
+        page: z.string(),
+        detail: z.string(),
+        rule: z.string().optional(),
+        impact: z.string().optional(),
+        count: z.number().int(),
+      }),
+    ),
+    counts: z.strictObject({
+      console_error: z.number().int(),
+      http_error: z.number().int(),
+      failed_request: z.number().int(),
+      broken_image: z.number().int(),
+      accessibility: z.number().int(),
+    }),
+    truncated: z.boolean(),
+  }),
   // How the judge was used for the judged expected results. The judge sees only runner-captured evidence.
   judge: z.strictObject({
     configured: z.boolean(),

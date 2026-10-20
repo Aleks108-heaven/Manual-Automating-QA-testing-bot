@@ -4,6 +4,7 @@
 // and a run that loops is BLOCKED (manual: Definitions, precedence rows 4 and 5).
 import type { Config } from "../config.ts";
 import type { PriorAction, ModelClient } from "../model/client.ts";
+import type { ImplicitCollector } from "../implicit/collect.ts";
 import type { JudgeClient, JudgeItem } from "../judge/client.ts";
 import { evidenceItems, judgedOutcome, judgeItems, type JudgedResult } from "../judge/judge.ts";
 import { evaluateExpected } from "../oracle/assertions.ts";
@@ -29,6 +30,8 @@ export interface LoopOptions {
   runDir: string;
   /** Decides the judged expected results. Without one, they get NO_EVIDENCE. */
   judge?: JudgeClient;
+  /** Collects the implicit findings after each step. */
+  implicit?: ImplicitCollector;
   /** The run's budget. The runner shares it with the final report and the judge, so they spend the same time and cost. */
   guard?: BudgetGuard;
   /** For tests: a clock the budget uses. */
@@ -205,6 +208,9 @@ export async function runAgentLoop(options: LoopOptions): Promise<LoopResult> {
 
     const position = (ref: string) => testCase.expected.findIndex((e) => e.id === ref);
     outcomes.push(...stepOutcomes.sort((a, b) => position(a.expected_ref) - position(b.expected_ref)));
+
+    // Implicit checks run after the expected results, and only report. They never become outcomes.
+    await options.implicit?.collectAfterStep(index);
     if (budgetStop || access.guardrails.blocked) break;
   }
 

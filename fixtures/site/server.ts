@@ -316,6 +316,26 @@ export async function startFixtureSite(options: FixtureOptions = {}): Promise<Fi
           ),
         );
 
+      // A page full of the things the implicit checks look for.
+      case "GET /implicit":
+        return send(
+          res,
+          200,
+          page(
+            "Implicit findings",
+            `<img src="/missing.png" alt="A picture that is missing">
+<img src="/broken.png" alt="A picture that is broken">
+<img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=">
+<button type="button"></button>
+<input type="text">
+<p>Nothing here is wrong with the page text.</p>`,
+            `console.error('The page script reported a problem');`,
+          ),
+        );
+
+      case "GET /broken.png":
+        return send(res, 200, "this is not an image", "image/png");
+
       case "GET /injection":
         return send(
           res,

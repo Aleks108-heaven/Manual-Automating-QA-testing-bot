@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { BudgetGuard, type BudgetStop } from "../agent/budget.ts";
 import { runAgentLoop, type LoopResult } from "../agent/loop.ts";
 import { requestFinalOutput } from "./final-output.ts";
+import { ImplicitCollector } from "../implicit/collect.ts";
 import type { JudgeClient } from "../judge/client.ts";
 import type { Config } from "../config.ts";
 import type { ModelClient } from "../model/client.ts";
@@ -105,6 +106,7 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
   const guard = new BudgetGuard(config.budgets, config.pricing);
   let finalBudgetStop: BudgetStop | null = null;
   let blocked: RunRecord["blocked"] = null;
+  let implicit: ImplicitCollector | null = null;
   let modelOutput: { attempts: number; valid: boolean; errors: string[] } = { attempts: 0, valid: false, errors: [] };
   // The raw HAR holds cookies and request bodies. It lives here, outside the run directory, until it is scrubbed.
   const harScratchDir = join(config.sessions.directory, `${runId}-har`);
@@ -165,6 +167,7 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
       });
       access = tools.runnerAccess();
       sink = new FileEvidenceSink(runDir, access, redactor);
+      implicit = new ImplicitCollector(access, config, redactor, testCase);
       loop = await runAgentLoop({
         testCase,
         model,
@@ -175,6 +178,7 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
         redactor,
         guard,
         runDir,
+        implicit,
         ...(options.judge ? { judge: options.judge } : {}),
         transcript: (entry) => appendFileSync(join(runDir, "model-context.jsonl"), `${JSON.stringify(entry)}\n`),
       });
@@ -296,6 +300,7 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
       stop: loop?.budgetStop ?? finalBudgetStop ?? null,
     },
     blocked,
+    implicit: implicit?.summary() ?? { enabled: config.implicit.enabled, findings: [], counts: { console_error: 0, http_error: 0, failed_request: 0, broken_image: 0, accessibility: 0 }, truncated: false },
     judge: {
       configured: options.judge !== undefined,
       name: options.judge?.name ?? null,

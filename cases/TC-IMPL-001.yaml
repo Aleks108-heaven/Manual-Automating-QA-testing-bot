@@ -1,0 +1,17 @@
+id: TC-IMPL-001
+title: Show the implicit findings page
+priority: P3
+technique: smoke
+risk: RISK-QUALITY   # fixture risk ID
+role: none
+preconditions:
+  - The page /implicit exists. It has a console error, a missing image, a broken image, and accessibility defects on purpose
+steps:
+  - open /implicit   # 1
+expected:
+  - id: e1
+    after_step: 1
+    kind: text_visible
+    where: {role: heading}
+    text: "Implicit findings"
+    description: The page heading is shown
