@@ -73,6 +73,8 @@ export interface ToolLayerOptions {
    * changes state and is not declared here, or always allowed by the configuration, is blocked.
    */
   allowedMutations?: readonly string[];
+  /** Use this browser (in a new context) instead of launching one. The browser is left running when the layer closes. */
+  sharedBrowser?: SharedBrowser;
 }
 
 /** Deep-scrubs a tool result. Strings under a `url` key are scrubbed as URLs. */
@@ -86,6 +88,27 @@ function scrubValue(redactor: Redactor, node: unknown, key?: string): unknown {
 function hostResolverRules(entries: readonly string[]): string {
   const hosts = entries.map((e) => e.replace(/:\d+$/, "").replace(/^\[|\]$/g, ""));
   return ["MAP * ~NOTFOUND", ...hosts.map((h) => `EXCLUDE ${h}`)].join(" , ");
+}
+
+/**
+ * One browser used by many runs, each in its own context. The eval suites run hundreds of cases, and starting a
+ * browser for each is the slow part. The browser is launched with the host rule for a fixed list of hosts, so a run
+ * may use it only if every host it allows is on that list: the rule that stops redirect hops (see create) must cover it.
+ */
+export interface SharedBrowser {
+  readonly browser: Browser;
+  /** The allowlist entries (host or host:port) the browser's host rule was built from. */
+  readonly entries: readonly string[];
+  readonly sandbox: boolean;
+  close(): Promise<void>;
+}
+
+export async function launchSharedBrowser(config: Config, entries: readonly string[]): Promise<SharedBrowser> {
+  const browser = await chromium.launch({
+    chromiumSandbox: config.browser.sandbox,
+    args: [`--host-resolver-rules=${hostResolverRules(entries)}`],
+  });
+  return { browser, entries: [...entries], sandbox: config.browser.sandbox, close: () => browser.close().catch(() => undefined) };
 }
 
 export class ToolLayer {
@@ -130,18 +153,28 @@ export class ToolLayer {
     // (verified on Playwright 1.63.0 with Chromium 153: a redirect to another host reached that host
     // when only the route handler was active). The browser's host rule refuses every host that is not
     // on the allowlist, including IP literals, so redirect hops never leave the machine.
-    const browser = await chromium.launch({
-      // Playwright adds --no-sandbox unless chromiumSandbox is true, so say it explicitly.
-      chromiumSandbox: options.config.browser.sandbox,
-      args: options.disableHostResolverRules ? [] : [`--host-resolver-rules=${hostResolverRules(entries)}`],
-    });
+    let browser: Browser;
+    if (options.sharedBrowser) {
+      const shared = options.sharedBrowser;
+      const uncovered = entries.filter((e) => !shared.entries.includes(e));
+      if (uncovered.length > 0) throw new Error(`The shared browser was launched for other hosts. Its host rule does not cover: ${uncovered.join(", ")}.`);
+      if (shared.sandbox !== options.config.browser.sandbox) throw new Error("The shared browser was launched with a different sandbox setting than this run's configuration.");
+      if (options.disableHostResolverRules) throw new Error("A shared browser always has the host rule, so disableHostResolverRules cannot be used with it.");
+      browser = shared.browser;
+    } else {
+      browser = await chromium.launch({
+        // Playwright adds --no-sandbox unless chromiumSandbox is true, so say it explicitly.
+        chromiumSandbox: options.config.browser.sandbox,
+        args: options.disableHostResolverRules ? [] : [`--host-resolver-rules=${hostResolverRules(entries)}`],
+      });
+    }
     // The raw HAR holds cookies and request bodies, so it goes to a private folder first. close() scrubs
     // it into the run directory and deletes the raw file. Playwright traces are not recorded at all.
     let rawHarPath: string | null = null;
     if (options.harPath) {
       if (!options.harScratchDir) throw new Error("harScratchDir is required with harPath");
       mkdirSync(options.harScratchDir, { recursive: true, mode: 0o700 });
-      rawHarPath = join(options.harScratchDir, `raw-${process.pid}-${Date.now()}.har`);
+      rawHarPath = join(options.harScratchDir, `raw-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.har`);
     }
     const context = await browser.newContext({
       acceptDownloads: false,
@@ -520,7 +553,8 @@ export class ToolLayer {
 
   async close(): Promise<void> {
     await this.context.close().catch(() => undefined); // this also writes the raw HAR
-    await this.browser.close().catch(() => undefined);
+    // A shared browser belongs to whoever launched it, and stays running for the next run.
+    if (!this.options.sharedBrowser) await this.browser.close().catch(() => undefined);
     if (this.rawHarPath && this.options.harPath) {
       try {
         if (existsSync(this.rawHarPath)) {

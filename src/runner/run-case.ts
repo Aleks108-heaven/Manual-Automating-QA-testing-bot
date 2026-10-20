@@ -19,7 +19,7 @@ import { establishSession, SessionError, type EstablishedSession } from "../sess
 import type { Call, TestCase } from "../schemas/case.ts";
 import type { ActorOutput } from "../schemas/actor.ts";
 import { RunRecordSchema, type RunRecord } from "../schemas/run-record.ts";
-import { ToolLayer, type RunnerAccess } from "../tools/tool-layer.ts";
+import { ToolLayer, type RunnerAccess, type SharedBrowser } from "../tools/tool-layer.ts";
 import { calculateVerdict } from "../verdict/calculate.ts";
 
 export interface HealthProbe {
@@ -55,6 +55,8 @@ export interface RunOptions {
   pause?: PauseSource;
   /** The pre-flight report that allowed this run, if there was one. Recorded in the run record. */
   preflight?: PreflightReport;
+  /** A browser shared with other runs (the eval suites). Each run still gets its own context. */
+  sharedBrowser?: SharedBrowser;
 }
 
 export interface RunResult {
@@ -170,6 +172,7 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
         caseData: testCase.data,
         secretValues,
         allowedMutations: testCase.allowed_mutations,
+        ...(options.sharedBrowser ? { sharedBrowser: options.sharedBrowser } : {}),
         harPath: join(runDir, "network.har"),
         harScratchDir,
         ...(session.storageStatePath ? { storageStatePath: session.storageStatePath } : {}),

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { loadConfig, type Config } from "../../../src/config.ts";
 import type { JudgeClient } from "../../../src/judge/client.ts";
 import type { PauseSource } from "../../../src/ops/kill-switch.ts";
+import type { SharedBrowser } from "../../../src/tools/tool-layer.ts";
 import type { FinalContext, ModelAction, ModelClient, ModelContext, ModelUsage } from "../../../src/model/client.ts";
 import { ScriptedModelClient, type Script } from "../../../src/model/scripted.ts";
 import { runCase, type BuildProbe, type RunResult } from "../../../src/runner/run-case.ts";
@@ -59,6 +60,7 @@ export async function runScripted(options: {
   model?: ModelClient;
   judge?: JudgeClient;
   pause?: PauseSource;
+  sharedBrowser?: SharedBrowser;
 }): Promise<RunResult> {
   const model = options.model ?? (typeof options.script === "string" ? ScriptedModelClient.fromFile(options.script) : new ScriptedModelClient(options.script));
   return runCase({
@@ -71,5 +73,6 @@ export async function runScripted(options: {
     ...(options.secrets ? { secrets: options.secrets } : {}),
     ...(options.judge ? { judge: options.judge } : {}),
     ...(options.pause ? { pause: options.pause } : {}),
+    ...(options.sharedBrowser ? { sharedBrowser: options.sharedBrowser } : {}),
   });
 }
