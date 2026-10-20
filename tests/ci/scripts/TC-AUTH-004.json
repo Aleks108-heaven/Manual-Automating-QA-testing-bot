@@ -1,0 +1,17 @@
+{
+  "case_id": "TC-AUTH-004",
+  "steps": [
+    [{ "tool": "goto", "args": { "url": "/login" } }],
+    [{ "tool": "fill", "args": { "target": { "role": "textbox", "name": "Username" }, "value": "lock_test_01" } }],
+    [{ "tool": "fill", "args": { "target": { "selector": "input[name=password]" }, "value": "Wrong#Pass1" } }],
+    [{ "tool": "click", "args": { "target": { "role": "button", "name": "Sign in" } } }],
+    [{ "tool": "fill_secret", "args": { "target": { "selector": "input[name=password]" }, "data_key": "data.correct_password" } }],
+    [{ "tool": "click", "args": { "target": { "role": "button", "name": "Sign in" } } }]
+  ],
+  "observations": [
+    { "expected_ref": "e1", "observed": "Account locked. Try again in 15 minutes.", "evidence": [] },
+    { "expected_ref": "e2", "observed": "Account locked. Try again in 15 minutes.", "evidence": [] },
+    { "expected_ref": "e3", "observed": "/login", "evidence": [] },
+    { "expected_ref": "e4", "observed": "0", "evidence": [] }
+  ]
+}

@@ -1,13 +1,14 @@
 // Runs one case end to end and writes the run record. This is the runner the CLI and the tests use.
 import { createHash, randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { runAgentLoop, type LoopResult } from "../agent/loop.ts";
 import type { Config } from "../config.ts";
 import type { ModelClient } from "../model/client.ts";
 import { FileEvidenceSink } from "../oracle/evidence.ts";
 import { Redactor } from "../redact/redactor.ts";
-import { EnvSecretStore, type SecretStore } from "../secrets/store.ts";
+import { scanArtifacts, type Finding } from "../redact/scan.ts";
+import { EnvSecretStore, parseSecretRef, type SecretStore } from "../secrets/store.ts";
 import { establishSession, SessionError, type EstablishedSession } from "../sessions/session-setup.ts";
 import type { Call, TestCase } from "../schemas/case.ts";
 import { ActorOutputSchema, type ActorOutput } from "../schemas/actor.ts";
@@ -95,6 +96,8 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
   let sink: FileEvidenceSink | null = null;
   let session: EstablishedSession | null = null;
   const redactor = new Redactor();
+  // The raw HAR holds cookies and request bodies. It lives here, outside the run directory, until it is scrubbed.
+  const harScratchDir = join(config.sessions.directory, `${runId}-har`);
 
   const before = await probe(targetOrigin);
   const fail = (message: string) => {
@@ -111,17 +114,27 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
       }
     }
 
+    // Every secret the case declares is protected from the start, before anything can echo it.
+    const secrets = options.secrets ?? new EnvSecretStore();
+    const secretValues: Record<string, string> = {};
+    if (infrastructureFailure === null) {
+      for (const [key, ref] of Object.entries(testCase.data)) {
+        const name = parseSecretRef(ref);
+        if (!name) continue;
+        try {
+          const value = await secrets.get(name);
+          redactor.add(value, `data.${key}`);
+          secretValues[key] = value;
+        } catch (error) {
+          fail(`secret unavailable: ${(error as Error).message}`);
+          break;
+        }
+      }
+    }
+
     if (infrastructureFailure === null) {
       try {
-        session = await establishSession({
-          role: testCase.role,
-          config,
-          secrets: options.secrets ?? new EnvSecretStore(),
-          targetOrigin,
-          runId,
-          runDir,
-          redactor,
-        });
+        session = await establishSession({ role: testCase.role, config, secrets, targetOrigin, runId, runDir, redactor });
       } catch (error) {
         if (!(error instanceof SessionError)) throw error;
         fail(`session setup failed: ${error.message}`);
@@ -129,10 +142,29 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
     }
 
     if (infrastructureFailure === null && session) {
-      tools = await ToolLayer.create({ targetOrigin, config, runDir, ...(session.storageStatePath ? { storageStatePath: session.storageStatePath } : {}) });
+      tools = await ToolLayer.create({
+        targetOrigin,
+        config,
+        runDir,
+        redactor,
+        caseData: testCase.data,
+        secretValues,
+        harPath: join(runDir, "network.har"),
+        harScratchDir,
+        ...(session.storageStatePath ? { storageStatePath: session.storageStatePath } : {}),
+      });
       access = tools.runnerAccess();
-      sink = new FileEvidenceSink(runDir, access);
-      loop = await runAgentLoop({ testCase, model, tools, access, config, evidence: sink });
+      sink = new FileEvidenceSink(runDir, access, redactor);
+      loop = await runAgentLoop({
+        testCase,
+        model,
+        tools,
+        access,
+        config,
+        evidence: sink,
+        redactor,
+        transcript: (entry) => appendFileSync(join(runDir, "model-context.jsonl"), `${JSON.stringify(entry)}\n`),
+      });
 
       if (loop.runnerStop === null && !loop.guardrailBlock) {
         const raw = await model.finalOutput({ testCase, actorStop: loop.actorStop });
@@ -163,8 +195,18 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
         cleanupErrors.push(`teardown failed: ${(error as Error).message}`);
       }
     }
-    await tools?.close();
+    await tools?.close(); // this scrubs the HAR into the run directory
+    rmSync(harScratchDir, { recursive: true, force: true });
     session?.cleanup();
+  }
+
+  // The last line of defense: look for any secret or credential header in everything the run stored.
+  // A finding means the scrubber has a defect. The offending files are scrubbed or deleted, and the run
+  // is INCONCLUSIVE, so a person looks at it.
+  const scan = scanArtifacts(runDir, redactor);
+  if (scan.findings.length > 0) {
+    cleanFindings(runDir, scan.findings, redactor);
+    fail(`a credential was found in stored artifacts (${[...new Set(scan.findings.map((f) => f.label))].join(", ")}). This is a scrubber defect. The files were cleaned.`);
   }
 
   const outcomes = loop?.outcomes ?? [];
@@ -218,6 +260,20 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
     verdict,
     verdict_row: row,
   });
-  writeFileSync(join(runDir, "run.json"), JSON.stringify(record, null, 2));
+  writeFileSync(join(runDir, "run.json"), JSON.stringify(redactor.scrubJson(record), null, 2));
+  const final = scanArtifacts(runDir, redactor);
+  if (final.findings.length > 0) throw new Error(`a credential is still present in the stored run after cleaning (${final.findings.map((f) => `${f.file}: ${f.label}`).join("; ")})`);
   return { record, runDir };
+}
+
+/** Scrubs text files that contain a secret, and deletes any other file that does. */
+function cleanFindings(runDir: string, findings: readonly Finding[], redactor: Redactor): void {
+  for (const file of new Set(findings.map((f) => f.file))) {
+    const path = join(runDir, file);
+    if (/\.(json|jsonl|har|txt|log|md|html|csv)$/i.test(file)) {
+      writeFileSync(path, redactor.scrubText(readFileSync(path, "utf8")));
+    } else {
+      rmSync(path, { force: true });
+    }
+  }
 }

@@ -1,0 +1,53 @@
+id: TC-AUTH-004
+title: Lock account on 5th failed login
+priority: P1
+technique: boundary value
+risk: RISK-LOCKOUT   # fixture risk ID
+role: none           # this case tests login itself
+preconditions:
+  - user lock_test_01 seeded with 4 failed attempts, via the test API
+setup:
+  - call: POST /__test/seed
+    body: {username: lock_test_01, failed_attempts: 4}
+    description: Seed the user with 4 failed attempts
+data:
+  wrong_password: "Wrong#Pass1"
+  correct_password: secret:lock_test_01.password
+allowed_mutations:
+  - POST /api/login
+steps:
+  - open /login                                                       # 1
+  - fill the Username field with lock_test_01                         # 2
+  - fill the Password field with data.wrong_password                  # 3
+  - click the Sign in button                                          # 4
+  - fill the Password field with data.correct_password (fill_secret)  # 5
+  - click the Sign in button                                          # 6
+expected:
+  - id: e1
+    after_step: 4
+    kind: text_visible
+    where: {role: alert}
+    text: "Account locked. Try again in 15 minutes."
+    description: The lockout banner is shown after the 5th failed attempt
+  - id: e2
+    after_step: 6
+    kind: text_visible
+    where: {role: alert}
+    text: "Account locked. Try again in 15 minutes."
+    description: The banner is still shown after the correct password
+  - id: e3
+    after_step: 6
+    kind: url
+    equals: /login
+    description: The user stays on the login page
+  - id: e4
+    after_step: 6
+    kind: count
+    where: {role: button, name: "Log out"}
+    equals: 0
+    description: No signed-in user menu is present
+cleanup:
+  - reset the fixture's users via the test API
+teardown:
+  - call: POST /__test/reset
+    description: Reset the fixture's users

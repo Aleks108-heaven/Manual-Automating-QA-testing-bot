@@ -1,0 +1,28 @@
+id: TC-ACCT-001
+title: Show the signed-in member their account page
+priority: P1
+technique: use case
+risk: RISK-SESSION   # fixture risk ID
+role: member         # the runner signs the browser in; the model never sees a login
+preconditions:
+  - the role "member" exists on the target
+steps:
+  - open /account   # 1
+expected:
+  - id: e1
+    after_step: 1
+    kind: text_visible
+    where: {selector: "main p"}
+    text: "Welcome, fixture_member"
+    description: The page greets the signed-in user by name
+  - id: e2
+    after_step: 1
+    kind: element_state
+    where: {role: button, name: "Log out"}
+    state: visible
+    description: The Log out button is visible
+  - id: e3
+    after_step: 1
+    kind: url
+    equals: /account
+    description: The user was not sent to the login page

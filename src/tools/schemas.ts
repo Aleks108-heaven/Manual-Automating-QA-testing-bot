@@ -6,6 +6,9 @@ export const TOOL_SCHEMAS = {
   goto: z.strictObject({ url: z.string().min(1) }),
   click: z.strictObject({ target: WhereSchema }),
   fill: z.strictObject({ target: WhereSchema, value: z.string() }),
+  // The model names a data entry of the case, such as "data.correct_password". It never names a secret
+  // and never receives a value (manual: Guardrails, "Secrets and sessions").
+  fill_secret: z.strictObject({ target: WhereSchema, data_key: z.string().regex(/^data\.[A-Za-z0-9_]+$/, 'use the form "data.<key>" from the case') }),
   press: z.strictObject({ key: z.string().min(1), target: WhereSchema.optional() }),
   wait_for: z.strictObject({
     target: WhereSchema,
@@ -27,6 +30,7 @@ export type ToolErrorCode =
   | "element_missing"
   | "ambiguous"
   | "blocked_by_guardrail"
+  | "secret_not_declared"
   | "timeout"
   | "tool_error";
 

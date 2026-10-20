@@ -1,10 +1,11 @@
 // The tool layer: the only way the model touches the browser (build brief, module 1).
 // It enforces the URL allowlist in code. Redirects, popups, iframes, websockets and
 // non-http(s) schemes are covered, and every decision is logged.
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser, type BrowserContext, type Frame, type Locator, type Page, type Route } from "playwright";
 import type { Config } from "../config.ts";
+import { Redactor } from "../redact/redactor.ts";
 import { describeWhere, type Where } from "../schemas/common.ts";
 import type { GuardrailEvent } from "../schemas/run-record.ts";
 import { Allowlist } from "./allowlist.ts";
@@ -33,6 +34,8 @@ export interface RunnerAccess {
   setStep(step: number): void;
   /** Waits until no request is in flight and the network has been quiet for quietMs (or maxMs passes). */
   settle(quietMs: number, maxMs: number): Promise<void>;
+  /** A screenshot with password fields and fields filled by fill_secret covered, for evidence. */
+  screenshot(): Promise<Buffer>;
   browserVersion: string;
   browserSandbox: boolean;
   guardrails: GuardrailLog;
@@ -40,6 +43,9 @@ export interface RunnerAccess {
 }
 
 class GuardrailBlock extends Error {}
+
+/** fill_secret was asked for something the case does not declare as a secret. */
+class SecretDeclarationError extends Error {}
 
 // Errors that mean "nobody answered", as opposed to an HTTP error response from the application.
 const CONNECTION_FAILURE = /ERR_CONNECTION_(REFUSED|RESET|TIMED_OUT|CLOSED)|ERR_NAME_NOT_RESOLVED|ERR_INTERNET_DISCONNECTED|ERR_ADDRESS_UNREACHABLE|ERR_EMPTY_RESPONSE|ERR_NETWORK_CHANGED/;
@@ -53,6 +59,22 @@ export interface ToolLayerOptions {
   disableHostResolverRules?: boolean;
   /** A Playwright storage state made by the session setup. The model never sees this path or its content. */
   storageStatePath?: string;
+  /** Everything that is shown to the model or stored passes through this. Secrets are added as they become known. */
+  redactor?: Redactor;
+  /** The case's `data`, and the resolved values of its secret entries, by key. Values stay inside this object. */
+  caseData?: Record<string, string>;
+  secretValues?: Record<string, string>;
+  /** Where the scrubbed HAR is written, and a private folder (outside the run directory) for the raw one. */
+  harPath?: string;
+  harScratchDir?: string;
+}
+
+/** Deep-scrubs a tool result. Strings under a `url` key are scrubbed as URLs. */
+function scrubValue(redactor: Redactor, node: unknown, key?: string): unknown {
+  if (typeof node === "string") return key === "url" ? redactor.scrubUrl(node) : redactor.scrubText(node);
+  if (Array.isArray(node)) return node.map((n) => scrubValue(redactor, n, key));
+  if (node && typeof node === "object") return Object.fromEntries(Object.entries(node).map(([k, v]) => [k, scrubValue(redactor, v, k)]));
+  return node;
 }
 
 function hostResolverRules(entries: readonly string[]): string {
@@ -62,6 +84,9 @@ function hostResolverRules(entries: readonly string[]): string {
 
 export class ToolLayer {
   readonly guardrails: GuardrailLog;
+  readonly redactor: Redactor;
+  private readonly secretFields: Where[] = [];
+  private rawHarPath: string | null = null;
   private readonly allowlist: Allowlist;
   private readonly entries: string[];
   private readonly network: NetworkEntry[] = [];
@@ -84,7 +109,8 @@ export class ToolLayer {
     this.current = page;
     this.allowlist = allowlist;
     this.entries = entries;
-    this.guardrails = options.guardrails ?? new GuardrailLog();
+    this.redactor = options.redactor ?? new Redactor();
+    this.guardrails = options.guardrails ?? new GuardrailLog((u) => this.redactor.scrubUrl(u), (t) => this.redactor.scrubText(t));
   }
 
   static async create(options: ToolLayerOptions): Promise<ToolLayer> {
@@ -101,15 +127,25 @@ export class ToolLayer {
       chromiumSandbox: options.config.browser.sandbox,
       args: options.disableHostResolverRules ? [] : [`--host-resolver-rules=${hostResolverRules(entries)}`],
     });
+    // The raw HAR holds cookies and request bodies, so it goes to a private folder first. close() scrubs
+    // it into the run directory and deletes the raw file. Playwright traces are not recorded at all.
+    let rawHarPath: string | null = null;
+    if (options.harPath) {
+      if (!options.harScratchDir) throw new Error("harScratchDir is required with harPath");
+      mkdirSync(options.harScratchDir, { recursive: true, mode: 0o700 });
+      rawHarPath = join(options.harScratchDir, `raw-${process.pid}-${Date.now()}.har`);
+    }
     const context = await browser.newContext({
       acceptDownloads: false,
       serviceWorkers: "block",
       ...(options.storageStatePath ? { storageState: options.storageStatePath } : {}),
+      ...(rawHarPath ? { recordHar: { path: rawHarPath, content: "omit" as const, mode: "full" as const } } : {}),
     });
     context.setDefaultTimeout(options.config.tools.actionTimeoutMs);
     context.setDefaultNavigationTimeout(options.config.tools.navigationTimeoutMs);
     const page = await context.newPage();
     const layer = new ToolLayer(browser, context, page, options, allowlist, entries);
+    layer.rawHarPath = rawHarPath;
     layer.guardrails.record({ type: "navigation", decision: "allowed", url: options.targetOrigin, detail: `allowlist: ${entries.join(", ")}` });
     await layer.install();
     return layer;
@@ -178,7 +214,7 @@ export class ToolLayer {
       // The target itself did not answer at all. That is infrastructure, not an application response
       // (manual: Definitions, precedence row 1), so the runner turns it into INCONCLUSIVE.
       if (CONNECTION_FAILURE.test(failure) && this.allowlist.check(request.url()).allowed) {
-        this.connectionFailures.push(`${request.method()} ${request.url()}: ${failure}`);
+        this.connectionFailures.push(this.redactor.scrubText(`${request.method()} ${this.redactor.scrubUrl(request.url())}: ${failure}`));
       }
       // Route handlers do not see redirect hops. The browser's host rule refuses them instead, and
       // the failure is the only trace, so log it here. (Requests that the route handler aborted
@@ -206,15 +242,25 @@ export class ToolLayer {
     } catch {
       /* keep the raw string */
     }
-    return { method, url, path, status, resourceType, failure, step: this.step, at: new Date().toISOString() };
+    // Stored and shown to the model only in scrubbed form.
+    return {
+      method,
+      url: this.redactor.scrubUrl(url),
+      path: this.redactor.scrubText(path),
+      status,
+      resourceType,
+      failure,
+      step: this.step,
+      at: new Date().toISOString(),
+    };
   }
 
   /** Backstop for navigations the route handler cannot see, such as data: iframes. */
   private attach(page: Page): void {
     page.on("console", (msg) => {
-      if (msg.type() === "error") this.consoleLog.push(msg.text());
+      if (msg.type() === "error") this.consoleLog.push(this.redactor.scrubText(msg.text()));
     });
-    page.on("pageerror", (error) => this.consoleLog.push(`pageerror: ${error.message}`));
+    page.on("pageerror", (error) => this.consoleLog.push(this.redactor.scrubText(`pageerror: ${error.message}`)));
     page.on("dialog", (dialog) => {
       void dialog.dismiss();
     });
@@ -265,6 +311,7 @@ export class ToolLayer {
           await new Promise((r) => setTimeout(r, 25));
         }
       },
+      screenshot: () => this.maskedScreenshot(),
       browserVersion: this.browser.version(),
       browserSandbox: this.options.config.browser.sandbox,
       guardrails: this.guardrails,
@@ -276,6 +323,13 @@ export class ToolLayer {
     return locatorFor(this.current, where);
   }
 
+  /** Covers every password input and every field filled by fill_secret, so a secret never appears in a PNG. */
+  private async maskedScreenshot(): Promise<Buffer> {
+    const page = this.current;
+    const mask = [page.locator("input[type=password]"), ...this.secretFields.map((w) => locatorFor(page, w))];
+    return page.screenshot({ mask, maskColor: "#000000" });
+  }
+
   /** Runs one tool call. The model reaches the browser only through this method. */
   async call(tool: string, rawArgs: unknown): Promise<ToolResult> {
     if (!(tool in TOOL_SCHEMAS)) return { ok: false, code: "unknown_tool", message: `unknown tool ${tool}` };
@@ -285,17 +339,20 @@ export class ToolLayer {
       return { ok: false, code: "invalid_args", message: parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") };
     }
     const blockedBefore = this.guardrails.blockedEvents().length;
+    let result: ToolResult;
     try {
       const data = await this.dispatch(name, parsed.data as never);
-      return { ok: true, data };
+      result = { ok: true, data };
     } catch (error) {
-      if (error instanceof GuardrailBlock) return { ok: false, code: "blocked_by_guardrail", message: error.message };
+      if (error instanceof GuardrailBlock) result = { ok: false, code: "blocked_by_guardrail", message: error.message };
+      else if (error instanceof SecretDeclarationError) result = { ok: false, code: "secret_not_declared", message: error.message };
       // An aborted navigation or request shows up as a Playwright error. Report the guardrail, not the symptom.
-      if (this.guardrails.blockedEvents().length > blockedBefore) {
-        return { ok: false, code: "blocked_by_guardrail", message: "the allowlist blocked a request during this action" };
-      }
-      return this.translate(error);
+      else if (this.guardrails.blockedEvents().length > blockedBefore) {
+        result = { ok: false, code: "blocked_by_guardrail", message: "the allowlist blocked a request during this action" };
+      } else result = this.translate(error);
     }
+    // Everything the model is shown passes through the scrubber, so a page that leaks a token cannot show it.
+    return result.ok ? { ok: true, data: scrubValue(this.redactor, result.data) } : { ...result, message: this.redactor.scrubText(result.message) };
   }
 
   private translate(error: unknown): ToolResult {
@@ -341,6 +398,23 @@ export class ToolLayer {
         await this.locate(args["target"] as Where).fill(String(args["value"]));
         return { filled: describeWhere(args["target"] as Where) };
       }
+      case "fill_secret": {
+        const target = args["target"] as Where;
+        const dataKey = String(args["data_key"]);
+        const key = dataKey.replace(/^data\./, "");
+        const declared = this.options.caseData?.[key];
+        if (declared === undefined || !declared.startsWith("secret:")) {
+          // The model may only use secrets the case declares. This stops an injected instruction from
+          // asking for another role's password or any other credential.
+          throw new SecretDeclarationError(`${dataKey} is not a secret declared by this case`);
+        }
+        const value = this.options.secretValues?.[key];
+        if (value === undefined) throw new SecretDeclarationError(`${dataKey} could not be resolved`);
+        this.redactor.add(value, dataKey);
+        await this.locate(target).fill(value);
+        this.secretFields.push(target);
+        return { filled: describeWhere(target), data_key: dataKey };
+      }
       case "press": {
         const target = args["target"] as Where | undefined;
         if (target) await this.locate(target).press(String(args["key"]));
@@ -359,7 +433,7 @@ export class ToolLayer {
         const label = typeof args["label"] === "string" ? args["label"].replace(/[^A-Za-z0-9_-]/g, "_") : "shot";
         const id = `shot-${String(this.shots).padStart(3, "0")}-${label}`;
         const path = join(this.options.runDir, "shots", `${id}.png`);
-        writeFileSync(path, await page.screenshot());
+        writeFileSync(path, await this.maskedScreenshot());
         return { screenshot_id: id };
       }
       case "console_errors":
@@ -370,7 +444,18 @@ export class ToolLayer {
   }
 
   async close(): Promise<void> {
-    await this.context.close().catch(() => undefined);
+    await this.context.close().catch(() => undefined); // this also writes the raw HAR
     await this.browser.close().catch(() => undefined);
+    if (this.rawHarPath && this.options.harPath) {
+      try {
+        if (existsSync(this.rawHarPath)) {
+          const har: unknown = JSON.parse(readFileSync(this.rawHarPath, "utf8"));
+          writeFileSync(this.options.harPath, JSON.stringify(this.redactor.scrubHar(har), null, 2));
+        }
+      } finally {
+        rmSync(this.rawHarPath, { force: true });
+        this.rawHarPath = null;
+      }
+    }
   }
 }

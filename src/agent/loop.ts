@@ -8,6 +8,7 @@ import type { EvidenceSink } from "../oracle/evidence.ts";
 import type { TestCase } from "../schemas/case.ts";
 import type { ActorStopReason, RunnerStopReason } from "../schemas/common.ts";
 import type { OutcomeRecord, StepRecord } from "../schemas/run-record.ts";
+import type { Redactor } from "../redact/redactor.ts";
 import type { RunnerAccess, ToolLayer } from "../tools/tool-layer.ts";
 
 export interface LoopOptions {
@@ -17,6 +18,9 @@ export interface LoopOptions {
   access: RunnerAccess;
   config: Config;
   evidence: EvidenceSink;
+  /** Receives everything the model is shown and does, already scrubbed. The runner stores it. */
+  transcript?: (entry: Record<string, unknown>) => void;
+  redactor?: Redactor;
 }
 
 export interface LoopResult {
@@ -29,7 +33,8 @@ export interface LoopResult {
 }
 
 export async function runAgentLoop(options: LoopOptions): Promise<LoopResult> {
-  const { testCase, model, tools, access, config, evidence } = options;
+  const { testCase, model, tools, access, config, evidence, transcript, redactor } = options;
+  const note = (entry: Record<string, unknown>) => transcript?.(redactor ? redactor.scrubJson(entry) : entry);
   const steps: StepRecord[] = [];
   const outcomes: OutcomeRecord[] = [];
   let actorStop: LoopResult["actorStop"] = null;
@@ -42,6 +47,7 @@ export async function runAgentLoop(options: LoopOptions): Promise<LoopResult> {
     steps.push(record);
     access.setStep(index);
     const prior: PriorAction[] = [];
+    note({ t: "step", step: index, text: stepText });
 
     for (;;) {
       if (prior.length >= config.budgets.maxToolCallsPerStep || toolCalls >= config.budgets.maxToolCallsPerRun) {
@@ -52,10 +58,12 @@ export async function runAgentLoop(options: LoopOptions): Promise<LoopResult> {
       if (action.type === "step_done") break;
       if (action.type === "stop") {
         actorStop = { reason: action.reason, step: index };
+        note({ t: "stop", step: index, reason: action.reason });
         break stepLoop;
       }
       toolCalls += 1;
       const result = await tools.call(action.tool, action.args);
+      note({ t: "tool", step: index, tool: action.tool, args: action.args, result: result.ok ? { ok: true, data: result.data } : { ok: false, code: result.code, message: result.message } });
       prior.push({ tool: action.tool, args: action.args, result: result.ok ? { ok: true, data: result.data } : { ok: false, code: result.code, message: result.message } });
       record.actions.push({
         tool: action.tool,

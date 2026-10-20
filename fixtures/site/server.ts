@@ -129,6 +129,10 @@ export async function startFixtureSite(options: FixtureOptions = {}): Promise<Fi
         sessions.clear();
         return json(res, 200, { ok: true });
       }
+      if (route === "GET /__test/sessions") {
+        // So a test can look for these exact tokens in everything the bot stored.
+        return json(res, 200, { tokens: [...sessions.keys()] });
+      }
       if (route === "POST /__test/defects") {
         const names = Array.isArray(body["defects"]) ? (body["defects"] as string[]) : [];
         try {

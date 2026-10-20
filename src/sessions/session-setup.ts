@@ -85,17 +85,20 @@ export interface EstablishOptions {
 
 export async function establishSession(options: EstablishOptions): Promise<EstablishedSession> {
   const { role, config, targetOrigin, redactor } = options;
-  if (role === "none") return { role, storageStatePath: null, cleanup() {} };
 
-  const roleConfig = config.roles[role];
-  if (!roleConfig) throw new SessionError(`unknown role "${role}" (known roles: ${Object.keys(config.roles).join(", ") || "none configured"})`);
-
+  // Checked for every role, including none: private scratch files (sessions, the raw HAR) must never
+  // sit in the run directory, because the run directory is stored and shared.
   const dir = resolve(config.sessions.directory);
   const runDir = resolve(options.runDir);
   const rel = relative(runDir, dir);
   if (rel === "" || !rel.startsWith("..")) {
     throw new SessionError("the session directory must not be inside the run directory, because the run directory is stored and shared");
   }
+
+  if (role === "none") return { role, storageStatePath: null, cleanup() {} };
+
+  const roleConfig = config.roles[role];
+  if (!roleConfig) throw new SessionError(`unknown role "${role}" (known roles: ${Object.keys(config.roles).join(", ") || "none configured"})`);
 
   const username = await secret(options.secrets, roleConfig.login.username, "username");
   const password = await secret(options.secrets, roleConfig.login.password, "password");
