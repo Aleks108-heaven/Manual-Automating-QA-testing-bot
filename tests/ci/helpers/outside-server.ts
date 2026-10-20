@@ -1,6 +1,8 @@
-// A second local server on a DIFFERENT host name (localhost, not 127.0.0.1). It stands in for
-// "the outside world" in the allowlist tests. It counts every connection, including websocket
-// upgrades, so a test can prove that the bot sent it nothing.
+// A second local server on a DIFFERENT host than the fixture. It stands in for "the outside
+// world" in the allowlist tests. It counts every connection, including websocket upgrades, so a
+// test can prove that the bot sent it nothing.
+//   host "localhost"  : a different host name (the fixture is on 127.0.0.1)
+//   host "127.0.0.2"  : a different IP literal, which DNS rules cannot catch
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 
@@ -11,7 +13,7 @@ export interface OutsideServer {
   close(): Promise<void>;
 }
 
-export async function startOutsideServer(): Promise<OutsideServer> {
+export async function startOutsideServer(host: "localhost" | "127.0.0.2" = "localhost"): Promise<OutsideServer> {
   const hits: string[] = [];
   const server: Server = createServer((req, res) => {
     hits.push(`${req.method} ${req.url}`);
@@ -23,10 +25,10 @@ export async function startOutsideServer(): Promise<OutsideServer> {
     socket.destroy();
   });
   server.on("connection", () => hits.push("CONNECTION"));
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  await new Promise<void>((resolve) => server.listen(0, host === "localhost" ? "127.0.0.1" : host, resolve));
   const port = (server.address() as AddressInfo).port;
   return {
-    origin: `http://localhost:${port}`,
+    origin: `http://${host}:${port}`,
     hits,
     close: () =>
       new Promise<void>((resolve) => {
