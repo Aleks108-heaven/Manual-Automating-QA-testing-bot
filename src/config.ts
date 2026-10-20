@@ -12,6 +12,18 @@ const ConfigSchema = z.strictObject({
   budgets: z.strictObject({
     maxToolCallsPerRun: z.number().int().min(1),
     maxToolCallsPerStep: z.number().int().min(1),
+    // Wall-clock time for the agent loop, in milliseconds.
+    maxWallMs: z.number().int().min(100),
+    // Cost of the model calls in one run, in US dollars, from the usage the model client reports.
+    maxCostUsd: z.number().min(0),
+  }),
+  // Price per million tokens. Fixture placeholders: the real values depend on the provider, which is still [to fill].
+  pricing: z.strictObject({ inputPerMTok: z.number().min(0), outputPerMTok: z.number().min(0) }),
+  loop: z.strictObject({
+    // The same action (tool and arguments) failing this many times in a row ends the run as BLOCKED.
+    failureLimit: z.number().int().min(2),
+    // The same action repeated this many times in a row, even if it succeeds, ends the run as BLOCKED.
+    repeatLimit: z.number().int().min(2),
   }),
   tools: z.strictObject({
     actionTimeoutMs: z.number().int().min(100),

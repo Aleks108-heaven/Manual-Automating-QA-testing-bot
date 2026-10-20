@@ -6,9 +6,15 @@ import type { FinalContext, ModelAction, ModelClient, ModelContext } from "./cli
 // A scripted fake model: it plays hand-written action sequences, one list per step. It makes CI
 // deterministic and free. It tests the bot's wiring, not a real model's judgment.
 
+// Every item can carry `usage` (tokens the pretend model "used") and `delay_ms` (how long it "thought").
+// They exist so the budget tests can run without a real model.
+const Extras = {
+  usage: z.strictObject({ input_tokens: z.number().int().min(0), output_tokens: z.number().int().min(0) }).optional(),
+  delay_ms: z.number().int().min(0).optional(),
+};
 const ScriptItem = z.union([
-  z.strictObject({ tool: z.string().min(1), args: z.record(z.string(), z.unknown()).default({}) }),
-  z.strictObject({ stop: z.enum(ACTOR_STOP_REASONS), note: z.string().optional() }),
+  z.strictObject({ tool: z.string().min(1), args: z.record(z.string(), z.unknown()).default({}), ...Extras }),
+  z.strictObject({ stop: z.enum(ACTOR_STOP_REASONS), note: z.string().optional(), ...Extras }),
 ]);
 
 export const ScriptSchema = z.strictObject({
@@ -42,8 +48,10 @@ export class ScriptedModelClient implements ModelClient {
     const items = this.script.steps[context.stepIndex - 1] ?? [];
     const item = items[context.actionsInStep.length];
     if (!item) return { type: "step_done" };
-    if ("stop" in item) return { type: "stop", reason: item.stop, ...(item.note ? { note: item.note } : {}) };
-    return { type: "tool_call", tool: item.tool, args: item.args };
+    if (item.delay_ms) await new Promise((resolve) => setTimeout(resolve, item.delay_ms));
+    const usage = item.usage ? { usage: item.usage } : {};
+    if ("stop" in item) return { type: "stop", reason: item.stop, ...(item.note ? { note: item.note } : {}), ...usage };
+    return { type: "tool_call", tool: item.tool, args: item.args, ...usage };
   }
 
   async finalOutput(context: FinalContext): Promise<unknown> {

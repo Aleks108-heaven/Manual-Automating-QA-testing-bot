@@ -166,7 +166,8 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
         transcript: (entry) => appendFileSync(join(runDir, "model-context.jsonl"), `${JSON.stringify(entry)}\n`),
       });
 
-      if (loop.runnerStop === null && !loop.guardrailBlock) {
+      // A stop decided by the runner (the loop detector) leaves nothing for the model to report.
+      if (loop.runnerStop === null && !loop.guardrailBlock && loop.stopSource !== "runner") {
         const raw = await model.finalOutput({ testCase, actorStop: loop.actorStop });
         const parsed = ActorOutputSchema.safeParse(raw);
         if (!parsed.success) {

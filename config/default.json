@@ -6,7 +6,17 @@
   },
   "budgets": {
     "maxToolCallsPerRun": 60,
-    "maxToolCallsPerStep": 8
+    "maxToolCallsPerStep": 8,
+    "maxWallMs": 120000,
+    "maxCostUsd": 1
+  },
+  "pricing": {
+    "inputPerMTok": 3,
+    "outputPerMTok": 15
+  },
+  "loop": {
+    "failureLimit": 3,
+    "repeatLimit": 8
   },
   "tools": {
     "actionTimeoutMs": 3000,

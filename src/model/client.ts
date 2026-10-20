@@ -18,10 +18,16 @@ export interface ModelContext {
   actionsInStep: readonly PriorAction[];
 }
 
+/** Tokens the provider reports for producing one action. The budget turns them into cost. */
+export interface ModelUsage {
+  input_tokens: number;
+  output_tokens: number;
+}
+
 export type ModelAction =
-  | { type: "tool_call"; tool: string; args: unknown }
-  | { type: "step_done" }
-  | { type: "stop"; reason: ActorStopReason; note?: string };
+  | { type: "tool_call"; tool: string; args: unknown; usage?: ModelUsage }
+  | { type: "step_done"; usage?: ModelUsage }
+  | { type: "stop"; reason: ActorStopReason; note?: string; usage?: ModelUsage };
 
 export interface FinalContext {
   testCase: TestCase;
