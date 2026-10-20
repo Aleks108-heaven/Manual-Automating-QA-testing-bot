@@ -23,11 +23,12 @@ Open only the page you need. Do not read the whole manual every session.
 
 ## Commands
 
-- Install: [to fill in M1]
-- Run CI tests: [to fill in M1]
-- Run one test: [to fill in M1]
-- Run the eval suite: [to fill in M1]
-- Lint and type check: [to fill in M1]
+- Install: `npm install`, then `npx playwright install chromium` (needs Node 24.2 or newer)
+- Run CI tests: `npm run test:ci`
+- Run one test file: `npx vitest run --config vitest.config.ts tests/ci/<file>.test.ts`
+- Run a case: `npm run run-case -- cases/TC-FORM-001.yaml` (add `--negative-control` or `--defects <name>`)
+- Run the eval suite: not built yet (live-model scenarios start in M3 to M5)
+- Type check, pin check and CI tests together: `npm run check`
 
 ## Workflow
 

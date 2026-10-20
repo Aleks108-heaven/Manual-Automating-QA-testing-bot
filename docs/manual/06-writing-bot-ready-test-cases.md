@@ -12,12 +12,14 @@ A case is bot-ready when a stranger could decide pass or fail from the written e
 | Technique | For example boundary value analysis, equivalence partitioning, decision table |
 | Priority | P1 to P3 ([to fill: your definitions]) |
 | Role | The user role the case runs as. The runner starts the browser from that role's stored session, so the model never sees a login. Use none for cases that test login itself |
-| Preconditions | State and data, seeded through an API rather than the UI |
+| Preconditions | State and data, seeded through an API rather than the UI. Written as text for humans |
+| Setup | The same preconditions as executable API calls, run before the case: `{call: "POST /path", body: {...}}`. Optional |
 | Test data | Concrete values. Secrets appear only as references, such as secret:lock_test_01.password |
 | Allowed mutations | The requests that change state which this case may trigger, as method and path, plus the GraphQL operation name where one endpoint carries many operations. Websocket sends and any GET that changes state (for example a logout link) must be listed too. The tool layer blocks every request that changes state and is not listed |
 | Steps | One action per step, numbered from 1 |
 | Expected results | Structured entries, one per check, each with an `id` and an `after_step` (see the next table) |
-| Cleanup | Teardown steps, through an API |
+| Cleanup | Teardown steps, through an API. Written as text for humans |
+| Teardown | The same cleanup as executable API calls, run after the case even when it fails. A failed teardown is reported and does not change the verdict. Optional |
 | Automation notes | Known UI quirks, and whether the case is a candidate for freezing to a script |
 
 **Expected results are structured.** Each expected result names a kind, so code can check it without an LLM. Use judged only for what cannot be asserted. Every entry also carries a plain-words description for humans and the judge.
@@ -66,6 +68,9 @@ risk: <risk or requirement ID>
 role: none                  # this case tests login itself
 preconditions:
   - user lock_test_01 seeded with 4 failed attempts, via API
+setup:
+  - call: POST /__test/seed             # example endpoint
+    body: {username: lock_test_01, failed_attempts: 4}
 data:
   wrong_password: "Wrong#Pass1"
   correct_password: secret:lock_test_01.password
@@ -104,6 +109,14 @@ expected:
     description: No signed-in user menu is present
 cleanup:
   - unlock user lock_test_01 via API
+teardown:
+  - call: POST /__test/reset
 ```
+
+Case files live in `cases/`, one YAML file per case, named after the case ID. The working examples are `cases/TC-FORM-001.yaml` and `cases/TC-AUTH-003.yaml`. Secrets are not available before milestone M2, so the lockout case above is the design target and the boundary pair TC-AUTH-003 is the first one that runs.
+
+**How the runner checks expected results.** After each step the runner waits until the network has been quiet for a short time, then evaluates the entries whose `after_step` is that step, in the order written. A check passes as soon as it holds, so a message that appears briefly is caught. A `count` must keep holding for a short moment, so "nothing is there" is not read before a response has arrived. A check that never holds waits out the timeout and gives MISMATCH, so a case with a failing expected result takes longer to run. The timeouts are configuration.
+
+**Addressing elements.** `where` takes either `{role, name}` (the accessible role and exact accessible name) or `{selector}` (a CSS selector). Some elements have no accessible role, such as password fields, and need a selector. A locator that matches more than one element is an error for `element_state`, so make it specific.
 
 Pair it with TC-AUTH-003, where the 4th failed attempt must not lock the account, so the boundary is covered on both sides.

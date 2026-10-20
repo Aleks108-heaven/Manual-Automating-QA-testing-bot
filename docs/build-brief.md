@@ -65,6 +65,8 @@ Build in seven milestones, starting with a thin slice that runs end to end, and 
 | M6: Reporting | The report as a view over the run record, and version stamps | T14, T15 |
 | M7: Freeze (hybrid path) | The freezer, as described in the modules table. Needed before the gating stage | T20, T21 |
 
+**Status.** M1 was built on 20 Oct 2026 and passes T1, T5, T6, T10, T17 and T22 (plus extra tests for the fixture site, the verdict table, the CLI and the allowlist). Two items are open before M1 can be called done. A person must review the diff, and the non-gating live-model run waits for the provider decision. M1 findings that changed the design: the browser host rule is mandatory because redirect hops bypass Playwright route handlers (manual, Guardrails page), cases gained executable `setup` and `teardown` calls, and the runner waits for the network to settle before it checks a step's expected results.
+
 **Tests that prove the manual's rules**
 
 | ID | Rule | Test | Runs in |

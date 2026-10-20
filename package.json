@@ -13,7 +13,8 @@
     "typecheck": "tsc --noEmit",
     "check:pins": "node scripts/check-pins.ts",
     "check": "npm run typecheck && npm run check:pins && npm run test:ci",
-    "run-case": "node src/cli.ts"
+    "run-case": "node src/cli.ts run",
+    "fixture": "node fixtures/site/server.ts"
   },
   "dependencies": {
     "playwright": "1.63.0",

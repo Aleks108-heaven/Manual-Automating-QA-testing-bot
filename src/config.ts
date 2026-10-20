@@ -36,6 +36,7 @@ export type Config = z.infer<typeof ConfigSchema>;
  *   QA_ALLOWED_HOSTS            comma-separated host or host:port entries, added to the allowlist
  *   QA_MAX_TOOL_CALLS_PER_RUN   integer
  *   QA_RUNS_DIR                 directory for run output
+ *   QA_ASSERTION_TIMEOUT_MS     how long a check waits before it counts as a MISMATCH
  */
 export function loadConfig(path = "config/default.json", env: NodeJS.ProcessEnv = process.env): Config {
   const config = ConfigSchema.parse(JSON.parse(readFileSync(path, "utf8")));
@@ -43,5 +44,6 @@ export function loadConfig(path = "config/default.json", env: NodeJS.ProcessEnv 
   if (extraHosts.length > 0) config.allowlist.hosts = [...config.allowlist.hosts, ...extraHosts];
   if (env["QA_MAX_TOOL_CALLS_PER_RUN"]) config.budgets.maxToolCallsPerRun = Number(env["QA_MAX_TOOL_CALLS_PER_RUN"]);
   if (env["QA_RUNS_DIR"]) config.runs.directory = env["QA_RUNS_DIR"];
+  if (env["QA_ASSERTION_TIMEOUT_MS"]) config.oracle.assertionTimeoutMs = Number(env["QA_ASSERTION_TIMEOUT_MS"]);
   return ConfigSchema.parse(config);
 }
