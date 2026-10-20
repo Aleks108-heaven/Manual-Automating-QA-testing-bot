@@ -2,6 +2,20 @@
 // Definitions page (docs/manual/05-definitions.md): the first matching row wins.
 import type { ActorStopReason, Outcome, RunnerStopReason, Verdict } from "../schemas/common.ts";
 
+/**
+ * The verdict of each row of the precedence table, in order. A test compares this list with the table
+ * in docs/manual/05-definitions.md, so the manual and the code cannot drift apart.
+ */
+export const PRECEDENCE_ROWS: ReadonlyArray<{ row: number; verdict: Verdict }> = [
+  { row: 1, verdict: "INCONCLUSIVE" }, // infrastructure made the evidence unreliable
+  { row: 2, verdict: "INCONCLUSIVE" }, // a guardrail block fired
+  { row: 3, verdict: "FAIL" }, // any expected result is a MISMATCH
+  { row: 4, verdict: "BLOCKED" }, // a step could not be performed
+  { row: 5, verdict: "INCOMPLETE" }, // a budget or timeout stopped the run
+  { row: 6, verdict: "INCONCLUSIVE" }, // NO_EVIDENCE, or an expected result never reached
+  { row: 7, verdict: "PASS" }, // every expected result is a MATCH
+];
+
 export interface VerdictInput {
   /** Number of expected results in the case. A case with none is invalid and never reaches here. */
   expectedCount: number;
