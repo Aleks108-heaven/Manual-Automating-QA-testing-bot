@@ -146,3 +146,38 @@ export function generateMutants(): Mutant[] {
 }
 
 export const REAL_MUTANTS = (m: Mutant) => !m.equivalent;
+
+/** A mutant the bot can be blamed for missing: it changes what users see, and some case is meant to notice it. */
+export const COVERED_MUTANTS = (m: Mutant) => !m.equivalent && m.coveredBy.length > 0;
+
+/**
+ * Picks n mutants, evenly spread over the classes and over each class's list, the same ones every time.
+ * Round robin over the classes, so a small sample still has every class in it.
+ */
+export function sampleMutants(mutants: readonly Mutant[], n: number): Mutant[] {
+  if (n >= mutants.length) return [...mutants];
+  const byClass = new Map<MutantClass, Mutant[]>();
+  for (const m of mutants) byClass.set(m.class, [...(byClass.get(m.class) ?? []), m]);
+  const classes = [...byClass.keys()];
+  const quota = new Map<MutantClass, number>(classes.map((c) => [c, 0]));
+  let left = n;
+  // Every class gets one place first, then each further place goes to the class that is most under-served (D'Hondt).
+  for (const c of classes) {
+    if (left === 0) break;
+    quota.set(c, 1);
+    left -= 1;
+  }
+  while (left > 0) {
+    const size = (c: MutantClass) => byClass.get(c)?.length ?? 0;
+    const next = classes.filter((c) => quota.get(c)! < size(c)).sort((a, b) => size(b) / (quota.get(b)! + 1) - size(a) / (quota.get(a)! + 1))[0];
+    if (!next) break;
+    quota.set(next, quota.get(next)! + 1);
+    left -= 1;
+  }
+  const picked = new Set<string>();
+  for (const [cls, list] of byClass) {
+    const q = quota.get(cls) ?? 0;
+    for (let i = 0; i < q; i += 1) picked.add(list[Math.floor(((i + 0.5) * list.length) / q)]!.id);
+  }
+  return mutants.filter((m) => picked.has(m.id));
+}

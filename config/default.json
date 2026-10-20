@@ -85,5 +85,16 @@
   },
   "runs": {
     "directory": "runs"
+  },
+  "evals": {
+    "assertionTimeoutMs": 1500,
+    "keepRuns": "problems",
+    "mutants": {
+      "minDetectionRate": 0.95,
+      "minDecisiveRate": 0.95,
+      "maxBaselineFalseFailRate": 0.05,
+      "baselineRuns": 3,
+      "repeat": 1
+    }
   }
 }

@@ -114,6 +114,25 @@ const ConfigSchema = z.strictObject({
   // Headers sent with setup and teardown calls to the application's test API (fixture only in M1).
   testApi: z.strictObject({ headers: z.record(z.string(), z.string()) }),
   runs: z.strictObject({ directory: z.string().min(1) }),
+  // The eval suites (manual: Pilot). The gates are provisional fixture values: the pilot protocol fixes the real ones.
+  evals: z.strictObject({
+    // Short, because a MISMATCH waits out the whole timeout and the suites run hundreds of cases.
+    assertionTimeoutMs: z.number().int().min(0),
+    // What to do with the run folders of a suite: keep only the ones a person should look at, or all of them.
+    keepRuns: z.enum(["problems", "all"]),
+    mutants: z.strictObject({
+      // Lowest acceptable share of covered, checkable mutants that some covering case reports as FAIL.
+      minDetectionRate: z.number().min(0).max(1),
+      // Lowest acceptable share of runs (clean and mutant) that end in PASS or FAIL.
+      minDecisiveRate: z.number().min(0).max(1),
+      // Highest acceptable share of clean runs that report FAIL.
+      maxBaselineFalseFailRate: z.number().min(0).max(1),
+      // How often each covering case runs on the clean application before any mutant is judged against it.
+      baselineRuns: z.number().int().min(1),
+      // How often each covering case runs against each mutant. More than 1 exposes flaky cases.
+      repeat: z.number().int().min(1),
+    }),
+  }),
 });
 export type Config = z.infer<typeof ConfigSchema>;
 

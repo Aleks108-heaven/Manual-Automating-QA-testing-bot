@@ -5,6 +5,7 @@
 //                        [--negative-control] [--mutate <expected id>] [--target <url>]
 //   node src/cli.ts preflight [--cases a.yaml,b.yaml] [--out <file>] [--target <url>]
 //   node src/cli.ts kill-switch status | engage | resume
+//   node src/cli.ts eval mutants [--sample N] [--repeat R]
 //
 // Every run starts with the pre-flight check and refuses to start if the kill switch is engaged.
 // Exit codes: 0 PASS, 1 FAIL, 2 any other verdict (BLOCKED, INCONCLUSIVE, INCOMPLETE), 3 the run was refused
@@ -15,6 +16,7 @@ import { parseArgs } from "node:util";
 import { CaseValidationError, loadCase } from "./cases/load.ts";
 import { negativeControl } from "./cases/mutate.ts";
 import { loadConfig } from "./config.ts";
+import { evaluateMutants, formatMutantReport } from "./eval/mutants.ts";
 import { ScriptedJudge } from "./judge/scripted.ts";
 import { ScriptedModelClient } from "./model/scripted.ts";
 import { KillSwitch, KillSwitchError, RunnerPausedError } from "./ops/kill-switch.ts";
@@ -29,6 +31,7 @@ import { assertKnownDefects, startFixtureSite, type FixtureSite } from "../fixtu
 
 const USAGE = `Usage: node src/cli.ts run <case.yaml> [options]
        node src/cli.ts preflight [--cases a.yaml,b.yaml] [--out <file>] [--for-resume]
+       node src/cli.ts eval mutants [--sample N] [--repeat R] [--out-dir <dir>]
        node src/cli.ts kill-switch status
        node src/cli.ts kill-switch engage --by <name> --reason <text>
        node src/cli.ts kill-switch resume --by <name> --review <ref> --fix <ref> --preflight-report <file>
@@ -184,6 +187,9 @@ async function main(): Promise<number> {
       cases: { type: "string" },
       out: { type: "string" },
       "for-resume": { type: "boolean", default: false },
+      sample: { type: "string" },
+      repeat: { type: "string" },
+      "out-dir": { type: "string" },
       help: { type: "boolean", short: "h", default: false },
     },
   });
@@ -191,6 +197,7 @@ async function main(): Promise<number> {
   const [command, casePath] = positionals;
   if (command === "kill-switch") return killSwitchCommand(casePath, values);
   if (command === "preflight") return preflightCommand(values);
+  if (command === "eval") return evalCommand(casePath, values);
   if (command !== "run" || !casePath) usage("Expected: run <case.yaml>, preflight, or kill-switch status|engage|resume");
 
   let testCase;
@@ -282,6 +289,48 @@ async function preflightCommand(values: { cases?: string; out?: string; target?:
     printPreflight(report);
     console.log(`Report: ${values.out ?? join(config.runs.directory, "preflight-latest.json")}`);
     return failedChecks(report).length > 0 ? 2 : 0;
+  } finally {
+    await site?.close();
+  }
+}
+
+function positiveInt(name: string, text: string | undefined): number | undefined {
+  if (text === undefined) return undefined;
+  const n = Number(text);
+  if (!Number.isInteger(n) || n < 1) usage(`--${name} must be a whole number of at least 1.`);
+  return n;
+}
+
+/** The eval suites. They run against the fixture site only, and they stop when the kill switch is engaged. */
+async function evalCommand(suite: string | undefined, values: { sample?: string; repeat?: string; "out-dir"?: string; target?: string }): Promise<number> {
+  if (suite !== "mutants") return usage("Expected: eval mutants [--sample N] [--repeat R] [--out-dir <dir>]");
+  if (values.target) usage("The eval suites start their own fixture site, so --target is not allowed.");
+  const config = loadConfig();
+  const sample = positiveInt("sample", values.sample);
+  const repeat = positiveInt("repeat", values.repeat);
+  const { targetOrigin, site } = await resolveTarget(undefined, []);
+  const outDir = values["out-dir"] ?? join(config.runs.directory, "eval", "mutants");
+  try {
+    const report = await evaluateMutants({
+      config,
+      site: site!,
+      outDir,
+      pause: new KillSwitch({ config, targetOrigin }),
+      ...(sample !== undefined ? { sample } : {}),
+      ...(repeat !== undefined ? { repeat } : {}),
+      onProgress: (done, total) => {
+        if (done % 25 === 0 || done === total) console.error(`  ${done} of ${total} runs`);
+      },
+    });
+    console.log(formatMutantReport(report));
+    console.log(`\nReport: ${join(outDir, "mutant-eval-latest.json")}`);
+    return report.ok ? 0 : 2;
+  } catch (error) {
+    if (error instanceof RunnerPausedError) {
+      console.error(error.message);
+      return 3;
+    }
+    throw error;
   } finally {
     await site?.close();
   }
