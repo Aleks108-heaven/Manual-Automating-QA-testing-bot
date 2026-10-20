@@ -1,0 +1,28 @@
+id: TC-KEY-002
+title: Reject a wrong API key
+priority: P1
+technique: equivalence partitioning
+risk: RISK-APIKEY   # fixture risk ID
+role: none
+data:
+  wrong_key: "not-the-key-0000"
+allowed_mutations:
+  - POST /api/apikey
+steps:
+  - open /apikey                                            # 1
+  - fill the API key field with data.wrong_key              # 2
+  - click the Save key button                               # 3
+expected:
+  - id: e1
+    after_step: 3
+    kind: text_visible
+    where: {role: alert}
+    text: "Key rejected"
+    exact: true
+    description: The rejection message is shown
+  - id: e2
+    after_step: 3
+    kind: status
+    request: "POST /api/apikey"
+    status: 403
+    description: The server refused the key

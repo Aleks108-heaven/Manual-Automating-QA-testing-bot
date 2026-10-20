@@ -1,0 +1,37 @@
+{
+  "case_id": "TC-FORM-003",
+  "steps": [
+    [
+      {
+        "args": {
+          "url": "/form"
+        },
+        "tool": "goto"
+      }
+    ],
+    [
+      {
+        "args": {
+          "value": "a@b",
+          "target": {
+            "role": "textbox",
+            "name": "Email"
+          }
+        },
+        "tool": "fill"
+      }
+    ],
+    [
+      {
+        "args": {
+          "target": {
+            "role": "button",
+            "name": "Subscribe"
+          }
+        },
+        "tool": "click"
+      }
+    ]
+  ],
+  "observations": []
+}

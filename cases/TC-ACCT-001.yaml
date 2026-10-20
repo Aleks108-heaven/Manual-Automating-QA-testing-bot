@@ -14,6 +14,7 @@ expected:
     kind: text_visible
     where: {selector: "main p"}
     text: "Welcome, fixture_member"
+    exact: true
     description: The page greets the signed-in user by name
   - id: e2
     after_step: 1

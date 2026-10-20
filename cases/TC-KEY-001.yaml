@@ -1,0 +1,28 @@
+id: TC-KEY-001
+title: Accept the right API key
+priority: P2
+technique: use case
+risk: RISK-APIKEY   # fixture risk ID
+role: none
+data:
+  api_key: secret:fixture_apikey.value
+allowed_mutations:
+  - POST /api/apikey
+steps:
+  - open /apikey                                            # 1
+  - fill the API key field with data.api_key (fill_secret)  # 2
+  - click the Save key button                               # 3
+expected:
+  - id: e1
+    after_step: 3
+    kind: text_visible
+    where: {role: status}
+    text: "Key accepted"
+    exact: true
+    description: The confirmation message is shown
+  - id: e2
+    after_step: 3
+    kind: status
+    request: "POST /api/apikey"
+    status: 200
+    description: The server accepted the key

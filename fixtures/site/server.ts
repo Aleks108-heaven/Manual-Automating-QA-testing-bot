@@ -5,14 +5,10 @@ import { createServer, type IncomingMessage, type ServerResponse, type Server } 
 import type { AddressInfo } from "node:net";
 import { FIXTURE_SECRETS } from "../secrets.ts";
 
-export const DEFECTS = ["lockout-off-by-one", "email-check-missing", "wrong-email-message"] as const;
-export type DefectName = (typeof DEFECTS)[number];
+import { assertKnownDefects, buildDefectConfig, emailIsValid, MESSAGES, type DefectConfig } from "../defects.ts";
 
-/** Throws on a defect name that does not exist, so a typo cannot silently run the case on a correct app. */
-export function assertKnownDefects(names: readonly string[]): void {
-  const unknown = names.filter((n) => !(DEFECTS as readonly string[]).includes(n));
-  if (unknown.length > 0) throw new Error(`Unknown fixture defect(s): ${unknown.join(", ")}. Known defects: ${DEFECTS.join(", ")}.`);
-}
+// The defects themselves are in fixtures/defects.ts. The command line checks names with this.
+export { assertKnownDefects };
 
 export interface FixtureOptions {
   /** An origin the bot must NOT reach. The trap pages point at it. */
@@ -29,7 +25,6 @@ export interface FixtureSite {
 }
 
 const BUILD = "fixture-1";
-const LOCK_MESSAGE = "Account locked. Try again in 15 minutes.";
 const SESSION_COOKIE = "fx_session";
 
 /** The password for a fixture user. Users the tests invent (through the seed endpoint) share one default. */
@@ -82,8 +77,7 @@ async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> 
 
 export async function startFixtureSite(options: FixtureOptions = {}): Promise<FixtureSite> {
   const outside = options.outsideOrigin ?? "http://localhost:9";
-  assertKnownDefects(options.defects ?? []);
-  let defects = new Set<string>(options.defects ?? []);
+  let defects: DefectConfig = buildDefectConfig(options.defects ?? []);
   const users = new Map<string, User>();
   const sessions = new Map<string, string>(); // session token -> username
   // Every request that changes state and reached this server. A blocked request must never appear here.
@@ -156,8 +150,8 @@ export async function startFixtureSite(options: FixtureOptions = {}): Promise<Fi
         } catch (error) {
           return json(res, 400, { error: (error as Error).message });
         }
-        defects = new Set(names);
-        return json(res, 200, { defects: [...defects] });
+        defects = buildDefectConfig(names);
+        return json(res, 200, { defects: names });
       }
       return json(res, 404, { error: "unknown test endpoint" });
     }
@@ -259,11 +253,11 @@ document.getElementById('ws').onclick = () => {
           res,
           200,
           page(
-            "Newsletter signup",
-            `<form id="f" novalidate><label for="email">Email</label>
+            defects.formHeading,
+            `<form id="f" novalidate><label for="email">${defects.emailLabel}</label>
 <input id="email" name="email" type="text" autocomplete="off">
 <div id="msg"></div>
-<button type="submit">Subscribe</button></form>`,
+<button type="submit">${defects.subscribeButton}</button></form>`,
             `document.getElementById('f').addEventListener('submit', async (e) => {
   e.preventDefault();
   const r = await fetch('/api/subscribe', {method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({email: document.getElementById('email').value})});
@@ -271,8 +265,8 @@ document.getElementById('ws').onclick = () => {
   const msg = document.getElementById('msg');
   msg.textContent = '';
   const p = document.createElement('p');
-  if (r.ok) { p.setAttribute('role','status'); p.textContent = 'Thanks for subscribing'; }
-  else { p.setAttribute('role','alert'); p.textContent = data.error; }
+  if (data.error !== undefined) { p.setAttribute('role','alert'); p.textContent = data.error; }
+  else { p.setAttribute('role','status'); p.textContent = data.message; }
   msg.appendChild(p);
 });`,
           ),
@@ -281,12 +275,10 @@ document.getElementById('ws').onclick = () => {
       case "POST /api/subscribe": {
         const body = await readJson(req);
         const email = String(body["email"] ?? "");
-        const valid = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email);
-        if (!valid && !defects.has("email-check-missing")) {
-          const message = defects.has("wrong-email-message") ? "Enter valid email" : "Enter a valid email";
-          return json(res, 422, { error: message });
+        if (!emailIsValid(email, defects.emailValidator)) {
+          return json(res, defects.emailInvalidStatus, { error: defects.message("email-invalid", MESSAGES["email-invalid"]) });
         }
-        return json(res, 200, { ok: true });
+        return json(res, 200, { ok: true, message: defects.message("email-ok", MESSAGES["email-ok"]) });
       }
 
       case "GET /login":
@@ -305,10 +297,10 @@ document.getElementById('ws').onclick = () => {
   const data = await r.json();
   const msg = document.getElementById('msg');
   msg.textContent = '';
-  if (r.ok) { const h = document.createElement('p'); h.textContent = 'Welcome'; msg.appendChild(h); const b = document.createElement('button'); b.textContent = 'Log out'; msg.appendChild(b); return; }
+  if (r.ok) { const h = document.createElement('p'); h.textContent = data.message; msg.appendChild(h); const b = document.createElement('button'); b.textContent = 'Log out'; msg.appendChild(b); return; }
   const p = document.createElement('p');
   p.setAttribute('role','alert');
-  if (r.status === 423) p.setAttribute('data-testid','lock-banner');
+  if (data.locked && ${defects.lockBannerTestId}) p.setAttribute('data-testid','lock-banner');
   p.textContent = data.error;
   msg.appendChild(p);
 });`,
@@ -319,8 +311,9 @@ document.getElementById('ws').onclick = () => {
         const body = await readJson(req);
         if (accountsDisabled) return json(res, 403, { error: "Account disabled" });
         const u = user(String(body["username"] ?? ""));
-        const lockAt = defects.has("lockout-off-by-one") ? 4 : 5;
-        if (u.locked) return json(res, 423, { error: LOCK_MESSAGE });
+        const lockAt = defects.lockoutThreshold;
+        const lockedReply = () => json(res, defects.lockStatus, { error: defects.message("account-locked", MESSAGES["account-locked"]), locked: true });
+        if (u.locked) return lockedReply();
         if (body["password"] === passwordFor(String(body["username"] ?? ""))) {
           u.failed = 0;
           const token = `fxs_${randomBytes(18).toString("hex")}`;
@@ -330,14 +323,14 @@ document.getElementById('ws').onclick = () => {
             "x-build": BUILD,
             "set-cookie": `${SESSION_COOKIE}=${token}; HttpOnly; Path=/; SameSite=Lax`,
           });
-          return void res.end(JSON.stringify({ ok: true }));
+          return void res.end(JSON.stringify({ ok: true, message: defects.message("login-ok", MESSAGES["login-ok"]) }));
         }
         u.failed += 1;
         if (u.failed >= lockAt) {
           u.locked = true;
-          return json(res, 423, { error: LOCK_MESSAGE });
+          return lockedReply();
         }
-        return json(res, 401, { error: "Invalid username or password" });
+        return json(res, defects.loginFailedStatus, { error: defects.message("login-failed", MESSAGES["login-failed"]) });
       }
 
       case "GET /account": {
@@ -348,8 +341,8 @@ document.getElementById('ws').onclick = () => {
           200,
           page(
             "Account",
-            `<p>Welcome, ${who}</p><button id="logout" type="button">Log out</button>`,
-            `document.getElementById('logout').addEventListener('click', async () => { await fetch('/api/logout', {method:'POST'}); location.href = '/login'; });`,
+            `<p>${defects.message("welcome", `Welcome, ${who}`)}</p>${defects.logoutButton === "missing" ? "" : `<button id="logout" type="button">${defects.logoutButton === "renamed" ? "Sign out" : "Log out"}</button>`}`,
+            `const lo = document.getElementById('logout'); if (lo) lo.addEventListener('click', async () => { await fetch('/api/logout', {method:'POST'}); location.href = '/login'; });`,
           ),
         );
       }
@@ -383,15 +376,20 @@ document.getElementById('ws').onclick = () => {
             `document.getElementById('f').addEventListener('submit', async (e) => {
   e.preventDefault();
   const r = await fetch('/api/apikey', {method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({key: document.getElementById('k').value})});
+  const data = await r.json();
   const msg = document.getElementById('msg'); msg.textContent = '';
-  const p = document.createElement('p'); p.setAttribute('role', r.ok ? 'status' : 'alert'); p.textContent = r.ok ? 'Key accepted' : 'Key rejected'; msg.appendChild(p);
+  const p = document.createElement('p'); p.setAttribute('role', data.error === undefined ? 'status' : 'alert'); p.textContent = data.error === undefined ? data.message : data.error; msg.appendChild(p);
 });`,
           ),
         );
 
       case "POST /api/apikey": {
         const body = await readJson(req);
-        return body["key"] === FIXTURE_SECRETS["fixture_apikey.value"] ? json(res, 200, { ok: true }) : json(res, 403, { error: "Key rejected" });
+        const right = body["key"] === FIXTURE_SECRETS["fixture_apikey.value"];
+        const accepted = defects.apiKeyMode === "accepts-any" ? true : defects.apiKeyMode === "rejects-all" ? false : right;
+        return accepted
+          ? json(res, defects.apiKeyOkStatus, { ok: true, message: defects.message("key-ok", MESSAGES["key-ok"]) })
+          : json(res, defects.apiKeyRejectStatus, { error: defects.message("key-bad", MESSAGES["key-bad"]) });
       }
 
       case "GET /transient":
@@ -542,8 +540,7 @@ document.getElementById('ws').onclick = () => {
     origin: `http://127.0.0.1:${port}`,
     port,
     setDefects(next) {
-      assertKnownDefects(next);
-      defects = new Set(next);
+      defects = buildDefectConfig(next);
     },
     close() {
       return new Promise<void>((resolve) => {

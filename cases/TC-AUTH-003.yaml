@@ -25,6 +25,7 @@ expected:
     kind: text_visible
     where: {role: alert}
     text: "Invalid username or password"
+    exact: true
     description: The 4th failed attempt shows the normal failure message
   - id: e2
     after_step: 4

@@ -36,7 +36,7 @@ const USAGE = `Usage: node src/cli.ts run <case.yaml> [options]
 Options:
   --script <file>        Scripted model actions (default: tests/ci/scripts/<case id>.json)
   --judge-script <file>  Scripted judge answers, for cases with judged expected results
-  --defects a,b          Turn on fixture defects: lockout-off-by-one, email-check-missing, wrong-email-message
+  --defects a,b          Turn on fixture defects, for example lockout-threshold=4 or message=email-invalid:add-period (see fixtures/defects.ts)
   --negative-control     Make one expected result wrong. The bot must report FAIL.
   --mutate <id>          With --negative-control, choose which expected result to make wrong
   --target <url>         Use an already running fixture site instead of starting one

@@ -20,6 +20,7 @@ expected:
     kind: text_visible
     where: {role: alert}
     text: "Enter a valid email"
+    exact: true
     description: The validation message is shown
   - id: e2
     after_step: 3

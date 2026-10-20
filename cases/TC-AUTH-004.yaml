@@ -28,12 +28,14 @@ expected:
     kind: text_visible
     where: {role: alert}
     text: "Account locked. Try again in 15 minutes."
+    exact: true
     description: The lockout banner is shown after the 5th failed attempt
   - id: e2
     after_step: 6
     kind: text_visible
     where: {role: alert}
     text: "Account locked. Try again in 15 minutes."
+    exact: true
     description: The banner is still shown after the correct password
   - id: e3
     after_step: 6
@@ -46,6 +48,18 @@ expected:
     where: {role: button, name: "Log out"}
     equals: 0
     description: No signed-in user menu is present
+  - id: e5
+    after_step: 4
+    kind: status
+    request: "POST /api/login"
+    status: 423
+    description: The server answers the 5th failed attempt with a lockout status
+  - id: e6
+    after_step: 4
+    kind: count
+    where: {selector: "[data-testid=lock-banner]"}
+    equals: 1
+    description: The lockout banner is marked so that it can be found
 cleanup:
   - reset the fixture's users via the test API
 teardown:

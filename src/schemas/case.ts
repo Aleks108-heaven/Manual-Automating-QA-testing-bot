@@ -16,6 +16,9 @@ const TextVisible = z.strictObject({
   kind: z.literal("text_visible"),
   where: WhereSchema,
   text: z.string().min(1),
+  // By default the element's text only has to contain `text`. With exact: true the whole text of the element
+  // (white space collapsed) has to equal it, which also catches a message with something added or removed.
+  exact: z.boolean().optional(),
 });
 
 const Url = z

@@ -55,7 +55,7 @@ async function pollUntil(check: () => Promise<Check>, timeoutMs: number, pollMs:
 function describeExpected(e: ExpectedResult): string {
   switch (e.kind) {
     case "text_visible":
-      return `${describeWhere(e.where)} shows "${e.text}"`;
+      return `${describeWhere(e.where)} shows ${e.exact ? "exactly " : ""}"${e.text}"`;
     case "url":
       return e.equals !== undefined ? `url equals ${e.equals}` : `url matches ${e.matches}`;
     case "status":
@@ -75,7 +75,8 @@ function checkFor(e: ExpectedResult, ctx: OracleContext): (() => Promise<Check>)
     case "text_visible":
       return async () => {
         const locator = locatorFor(access.page(), e.where);
-        const wanted = new RegExp(escapeRegExp(e.text));
+        // Playwright compares text with white space collapsed, so a double space is not a difference a user could see.
+        const wanted = new RegExp(e.exact ? `^\\s*${escapeRegExp(e.text)}\\s*$` : escapeRegExp(e.text));
         const texts = (await locator.all()).length === 0 ? [] : await locator.allInnerTexts();
         const visibleMatch = locator.filter({ hasText: wanted });
         const found = (await visibleMatch.count()) > 0 && (await visibleMatch.first().isVisible());
