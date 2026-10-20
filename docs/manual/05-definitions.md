@@ -32,6 +32,9 @@ A run that is not PASS needs a person before release when the case is P1. This i
 - A MISMATCH followed by a blocked step still gives FAIL, and the report lists the blocked step.
 - The stop reason `loop` can be reported by the model or decided by the runner's loop detection (the same action failing 3 times in a row, or repeated 8 times in a row). Both give BLOCKED, and the run record says which one decided.
 - A credential found in a stored file by the final scan is an infrastructure failure of the bot itself (row 1). The files are cleaned and the run is INCONCLUSIVE.
+- If the model's final report stays invalid after the allowed retries, the run is INCONCLUSIVE (row 1). The verdict never depends on that report, but a bot whose output cannot be trusted needs a person to look at it. A report is never repaired: a missing field is not filled in and a wrong value is not corrected.
+- A judged result is decided by the judge, only from evidence the runner captured at that step. The judge's answer counts only if it is well formed, covers exactly the items asked about, and cites evidence that the runner supplied. A MATCH or MISMATCH with no cited evidence is not accepted. After the allowed retries the result is NO_EVIDENCE.
+- The precedence table above is also kept as data in the code, and a test compares the two, so they cannot disagree.
 - A case with no expected results is invalid. The runner rejects it before the run starts, and it counts as not executed, never as PASS.
 - If the judge reports that the evidence for a judged result tries to influence it, that result gets NO_EVIDENCE.
 - `injection_suspected` from the actor does not change the verdict. It is reported and alerted to the security reviewer.

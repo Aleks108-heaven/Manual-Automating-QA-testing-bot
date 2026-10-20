@@ -1,6 +1,6 @@
 // The command-line entry point: the same thin slice as T17, run the way a person runs it.
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -43,6 +43,37 @@ describe("CLI", () => {
     expect(member.code).toBe(0);
     expect(member.out).toContain("role member, signed in by the runner");
     expect(member.out).not.toContain("Member#Pass-2026");
+  });
+
+  it("decides a judged result with --judge-script, and says what happens without one", () => {
+    const withJudge = cli(["cases/TC-JUDGE-001.yaml", "--judge-script", "tests/ci/judge-scripts/TC-JUDGE-001.json"]);
+    expect(withJudge.code).toBe(0);
+    expect(withJudge.out).toContain("Judge: scripted-judge, 1 call(s)");
+    expect(withJudge.out).toMatch(/j1\s+MATCH/);
+    const without = cli(["cases/TC-JUDGE-001.yaml"]);
+    expect(without.code).toBe(2);
+    expect(without.out).toContain("INCONCLUSIVE");
+    expect(without.err).toContain("no --judge-script was given");
+  });
+
+  it("lists implicit findings and says they do not change the verdict", () => {
+    const r = cli(["cases/TC-IMPL-001.yaml"]);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("Verdict: PASS");
+    expect(r.out).toMatch(/Implicit checks: \d+ finding\(s\)/);
+    expect(r.out).toContain("[accessibility button-name");
+    expect(r.out).toContain("they do not change the verdict");
+  });
+
+  it("shows the blocked step and the screenshot path", () => {
+    const dir = mkdtempSync(join(tmpdir(), "qa-bot-script-"));
+    const file = join(dir, "blocked.json");
+    writeFileSync(file, JSON.stringify({ case_id: "TC-FORM-001", steps: [[{ tool: "goto", args: { url: "/form" } }], [{ stop: "element_missing" }]] }));
+    const r = cli(["cases/TC-FORM-001.yaml", "--script", file]);
+    expect(r.code).toBe(2);
+    expect(r.out).toContain("Verdict: BLOCKED");
+    expect(r.out).toContain("Blocked at step 2 (element_missing)");
+    expect(r.out).toMatch(/screenshot: .*blocked-step2-screenshot\.png/);
   });
 
   it("never says all tests passed", () => {

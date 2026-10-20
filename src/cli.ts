@@ -11,6 +11,7 @@ import { parseArgs } from "node:util";
 import { CaseValidationError, loadCase } from "./cases/load.ts";
 import { negativeControl } from "./cases/mutate.ts";
 import { loadConfig } from "./config.ts";
+import { ScriptedJudge } from "./judge/scripted.ts";
 import { ScriptedModelClient } from "./model/scripted.ts";
 import { runCase } from "./runner/run-case.ts";
 import { StaticSecretStore } from "./secrets/store.ts";
@@ -22,6 +23,7 @@ const USAGE = `Usage: node src/cli.ts run <case.yaml> [options]
 
 Options:
   --script <file>        Scripted model actions (default: tests/ci/scripts/<case id>.json)
+  --judge-script <file>  Scripted judge answers, for cases with judged expected results
   --defects a,b          Turn on fixture defects: lockout-off-by-one, email-check-missing, wrong-email-message
   --negative-control     Make one expected result wrong. The bot must report FAIL.
   --mutate <id>          With --negative-control, choose which expected result to make wrong
@@ -60,11 +62,31 @@ function printSummary(record: RunRecord, runDir: string, note: string | null): v
     line(`  ${o.expected_ref.padEnd(4)} ${o.outcome.padEnd(11)} ${o.expected}${o.outcome === "MATCH" ? "" : `   actual: ${o.actual ?? "n/a"}`}`);
   }
   if (record.outcomes.length === 0) line("  (no expected result was evaluated)");
+  if (record.blocked) {
+    const shot = record.evidence.find((e) => e.id === record.blocked?.evidence.find((id) => id.endsWith("-screenshot")));
+    line(`  Blocked at step ${record.blocked.step} (${record.blocked.reason}): ${record.blocked.step_text}`);
+    if (record.blocked.tool_error) line(`    last tool error: ${record.blocked.tool_error}`);
+    if (shot) line(`    screenshot: ${join(runDir, shot.path)}`);
+  }
   if (record.run_state.actor_stop_reason) line(`  Stopped: ${record.run_state.stop_source === "runner" ? "the runner's loop detection" : "the actor"} reported ${record.run_state.actor_stop_reason}`);
   if (record.run_state.runner_stop_reason) line(`  Stopped: the runner reported ${record.run_state.runner_stop_reason}${record.budget.stop ? ` (${record.budget.stop.detail})` : ""}`);
   if (record.run_state.infrastructure_failure) line(`  Infrastructure: ${record.run_state.infrastructure_failure}`);
   for (const e of record.guardrail_events.filter((g) => g.decision === "blocked")) line(`  Guardrail blocked ${e.type}: ${e.url} (${e.detail})`);
   for (const c of record.cleanup_errors) line(`  Cleanup: ${c}`);
+  if (record.model_output.attempts > 1 || !record.model_output.valid) {
+    line(`  Model report: ${record.model_output.valid ? "accepted" : "rejected"} after ${record.model_output.attempts} attempt(s)${record.model_output.errors.length ? ` (${record.model_output.errors[record.model_output.errors.length - 1]})` : ""}`);
+  }
+  if (record.judge.configured) {
+    line(`  Judge: ${record.judge.name}, ${record.judge.calls} call(s), ${record.judge.attempts} attempt(s)${record.judge.injection_reports ? `, ${record.judge.injection_reports} injection report(s)` : ""}`);
+  }
+  if (record.run_state.injection_suspected) line("  ALERT: an attempt to influence the bot was reported. The security reviewer should look at this run.");
+  const imp = record.implicit;
+  if (imp.enabled) {
+    const total = imp.findings.length;
+    line(`  Implicit checks: ${total} finding(s)${total ? ` (console ${imp.counts.console_error}, HTTP ${imp.counts.http_error}, failed requests ${imp.counts.failed_request}, images ${imp.counts.broken_image}, accessibility ${imp.counts.accessibility})` : ""}. Reported only: they do not change the verdict.`);
+    for (const f of imp.findings.slice(0, 8)) line(`    - [${f.kind}${f.rule ? ` ${f.rule}` : ""}${f.impact ? `, ${f.impact}` : ""}] ${f.detail}${f.count > 1 ? ` (x${f.count})` : ""}`);
+    if (total > 8) line(`    ... and ${total - 8} more in run.json${imp.truncated ? " (the list was capped)" : ""}`);
+  }
   line();
   const notVerified = record.verdict === "PASS" ? 0 : 1;
   line(`Summary: bot executed 1 of 1 planned cases, ${notVerified} not verified.`);
@@ -76,6 +98,7 @@ async function main(): Promise<number> {
     allowPositionals: true,
     options: {
       script: { type: "string" },
+      "judge-script": { type: "string" },
       defects: { type: "string" },
       "negative-control": { type: "boolean", default: false },
       mutate: { type: "string" },
@@ -100,6 +123,12 @@ async function main(): Promise<number> {
 
   const scriptPath = values.script ?? `tests/ci/scripts/${testCase.id}.json`;
   if (!existsSync(scriptPath)) usage(`No script found at ${scriptPath}. Pass --script <file>.`);
+  const judgePath = values["judge-script"];
+  if (judgePath !== undefined && !existsSync(judgePath)) usage(`No judge script found at ${judgePath}.`);
+  const hasJudged = testCase.expected.some((e) => e.kind === "judged");
+  if (hasJudged && judgePath === undefined) {
+    console.error("Note: this case has judged expected results and no --judge-script was given, so they will get NO_EVIDENCE and the run will be INCONCLUSIVE.\n");
+  }
 
   let note: string | null = null;
   if (values["negative-control"]) {
@@ -146,6 +175,7 @@ async function main(): Promise<number> {
       caseSource: casePath,
       targetOrigin,
       model: ScriptedModelClient.fromFile(scriptPath),
+      ...(judgePath !== undefined ? { judge: ScriptedJudge.fromFile(judgePath) } : {}),
       config,
       // In M1 and M2 the only valid target is the fixture site, whose credentials are fake.
       secrets: new StaticSecretStore(FIXTURE_SECRETS),

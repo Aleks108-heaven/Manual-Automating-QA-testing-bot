@@ -2,7 +2,7 @@
 
 A bot that executes written test cases in a browser and reports a verdict with evidence. The design is in [docs/manual/](docs/manual/00-index.md), and the build plan is in [docs/build-brief.md](docs/build-brief.md).
 
-**Status: milestones M1 (the thin slice) and M2 (sessions, secrets, scrubbing, budgets) are built.** The bot runs cases against a local fixture site with a *scripted fake model*. No API key, no cost, and no real application is involved. The live model, the judge, network-level mutation blocking, the golden set, the final report, and frozen scripts come in later milestones.
+**Status: milestones M1 (the thin slice), M2 (sessions, secrets, scrubbing, budgets) and M3 (the judge, implicit checks, validated output) are built.** The bot runs cases against a local fixture site with a *scripted fake model and judge*. No API key, no cost, and no real application is involved. A live model and judge, network-level mutation blocking, the golden set, the final report, and frozen scripts come in later milestones.
 
 ## Run it
 
@@ -36,7 +36,7 @@ If the negative control ever reports PASS, the bot is broken. Stop and fix it be
 The manual describes the finished bot, and some of it is not built. Do not rely on these until their milestone:
 
 - `allowed_mutations` in a case is read but **not enforced** (M4).
-- There is no judge, so a `judged` expected result always gives NO_EVIDENCE (M3). There are no implicit checks (console errors and so on) either.
+- The judge is a scripted fake. A live judge needs the provider decision, and its prompt (`prompts/judge.v1.md`) has never been tried on a real model. The live ("Eval") halves of T6, T7 and T23 wait for that.
 - There is no pre-flight check and no kill switch (M4). The secret manager is an environment-variable store, and the real one is a decision still open.
 - The only model is the scripted fake. No live model has been run, so the cost figures are computed from usage that the test scripts invent.
 - Sessions are made through the application's login API. A UI or single-sign-on login is not built.
@@ -51,12 +51,25 @@ Reviews: [docs/m1-review.md](docs/m1-review.md), [docs/m2-review.md](docs/m2-rev
 - **Budgets and loop detection.** Tool calls, time and cost have limits, and a run that hits one is INCOMPLETE. The same action failing 3 times in a row (or repeated 8 times) is BLOCKED. Limits are in `config/default.json`.
 - **Run record v1** with the session, budget, redaction and scan sections. The CLI prints budget and scrub lines.
 
+## What M3 added
+
+- **The judge.** A `judged` expected result goes to a separate judge that sees only the evidence the runner captured, never the actor's notes. Its answer is checked in code: it must cover exactly the items asked about and cite evidence the runner supplied, or it is retried and then becomes NO_EVIDENCE. An injection report from the judge also gives NO_EVIDENCE. Try `npm run run-case -- cases/TC-JUDGE-001.yaml --judge-script tests/ci/judge-scripts/TC-JUDGE-001.json`.
+- **Implicit checks.** Console errors, HTTP errors, failed requests, broken images, and accessibility violations (`axe-core`) are listed after each run and never change the verdict. Try `npm run run-case -- cases/TC-IMPL-001.yaml`.
+- **Validated model output.** The model's final report is checked, sent back with a description of the problem when wrong (up to 3 attempts), and never repaired. A report that stays invalid makes the run INCONCLUSIVE.
+- **BLOCKED carries evidence.** A run stopped by a missing element records the step, the reason, and a screenshot the runner took at that moment.
+- **The verdict table is checked against the manual** by a test that reads `docs/manual/05-definitions.md`, plus an enumeration of about a thousand combinations.
+- **Run record v2** with the judge, implicit, blocked and model-output sections.
+
 Check that nothing leaked, after any run: `Select-String -Path (Get-ChildItem runs -Recurse -File).FullName -Pattern "Correct#Pass1","Member#Pass-2026" -SimpleMatch` finds nothing.
 
 ## What the tests prove
 
 | Test | Rule | File |
 | --- | --- | --- |
+| T7 | A missing element is BLOCKED, with the step and a screenshot | `tests/ci/blocked.test.ts` |
+| T8 | Malformed model output is rejected and retried, never repaired | `tests/ci/model-output.test.ts` |
+| T18 | Verdict precedence: every row, every combination, and the manual's table | `tests/ci/verdict-table.test.ts` |
+| T23 | The judge sees only runner evidence; an injection report gives NO_EVIDENCE | `tests/ci/judge.test.ts` |
 | T2 | Credentials never reach the model or the artifacts | `tests/ci/credentials.test.ts`, `tests/ci/fill-secret.test.ts` |
 | T3 | A budget cutoff is INCOMPLETE | `tests/ci/budget.test.ts` |
 | T4 | Loops stop (BLOCKED) | `tests/ci/loop.test.ts` |
@@ -88,6 +101,7 @@ Every version is pinned exactly (`.npmrc` sets `save-exact`, the lockfile is com
 | Package | Why |
 | --- | --- |
 | `playwright` | Drives the browser; the tool layer is built on it |
+| `axe-core` | Automated accessibility rules for the implicit checks (MPL-2.0 licence, no dependencies, injected into the page by the runner, never by the model) |
 | `yaml` | Reads the YAML case files |
 | `zod` | Typed schemas for cases, model output, and the run record |
 | `typescript` (dev) | Type checking; Node runs the `.ts` files directly |

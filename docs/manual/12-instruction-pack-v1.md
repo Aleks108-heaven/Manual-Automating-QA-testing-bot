@@ -9,6 +9,8 @@ This pack is what the bot reads. It is version-pinned, reviewed like code, and m
 
 This page does not repeat them. Who decides a verdict, the precedence table, and the stop-reason mapping live on the Definitions page. The actor's stop reasons are element_missing, step_ambiguous, and loop, and budget, timeout, and crash stops come from the runner. The runner also detects loops itself and does not wait for the model to report them.
 
+**What the judge is given.** Its input has exactly these parts: the case ID; the judged items, each with the case author's description and the evidence the runner captured for it (the evidence IDs it may cite, the scrubbed text of the snapshot and network log, the path of the screenshot); the list of actions the runner saw (tool, arguments, whether each worked); the scrubbed console errors; the attempt number; and, on a retry, a description of what was wrong with the previous answer. It is never given the actor's observations, notes, evidence claims or injection flag, and the code has no field in which to put them. Its answer is checked in code before it counts (Definitions page).
+
 **Handling rules**
 
 - Change the prompts only by pull request.
