@@ -42,7 +42,7 @@ const auditActions = (config: Config) =>
     : [];
 
 function goodReport(at: Date, overrides: Partial<PreflightReport> = {}): PreflightReport {
-  return { schema_version: 1, at: at.toISOString(), target: site.origin, ok: true, checks: [{ name: "target healthy", status: "passed", detail: "ok", ms: 1 }], ...overrides };
+  return { schema_version: 1, purpose: "resume", at: at.toISOString(), target: site.origin, ok: true, checks: [{ name: "target healthy", status: "passed", detail: "ok", ms: 1 }], ...overrides };
 }
 function saveReport(config: Config, report: unknown): string {
   const path = join(dirname(config.killSwitch.stateFile), `report-${Math.random().toString(36).slice(2)}.json`);
@@ -229,6 +229,12 @@ describe("T11 resuming follows the documented steps", () => {
     const skipped = goodReport(at, { checks: [{ name: "canary", status: "skipped", detail: "skipped", ms: 0 }] });
     const lying = goodReport(at, { ok: true, checks: [{ name: "canary", status: "failed", detail: "", ms: 1 }] });
     for (const report of [failed, skipped, lying]) await expect(ks.resume({ ...good, preflightReport: saveReport(config, report) })).rejects.toThrow(/not clean/);
+    expect(ks.isPaused()).toBe(true);
+  });
+
+  it("is refused when the report was made for a run, not for resuming", async () => {
+    const { config, ks } = await engaged();
+    await expect(ks.resume({ ...good, preflightReport: saveReport(config, goodReport(later(), { purpose: "run" })) })).rejects.toThrow(/not made for resuming/);
     expect(ks.isPaused()).toBe(true);
   });
 

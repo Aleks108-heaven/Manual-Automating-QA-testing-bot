@@ -80,11 +80,11 @@ export const BudgetRecordSchema = z.strictObject({
 });
 export type BudgetRecord = z.infer<typeof BudgetRecordSchema>;
 
-// Run record, schema version 2 (M3). Version 0 (M1) had no session, budget, redaction or scan sections (added in
-// version 1, M2). Version 2 adds how the model's final report fared, and the judge, implicit-check and
-// blocked-step sections.
+// Run record, schema version 3 (M4). Version 0 (M1) had no session, budget, redaction or scan sections (added in
+// version 1, M2). Version 2 (M3) added how the model's final report fared, and the judge, implicit-check and
+// blocked-step sections. Version 3 (M4) adds the pre-flight summary.
 export const RunRecordSchema = z.strictObject({
-  schema_version: z.literal(2),
+  schema_version: z.literal(3),
   run_id: z.string().min(1),
   case: z.strictObject({ id: z.string(), title: z.string(), priority: z.string(), source: z.string() }),
   started_at: z.string(),
@@ -121,6 +121,14 @@ export const RunRecordSchema = z.strictObject({
       source: z.enum(["actor", "runner"]),
       tool_error: z.string().nullable(),
       evidence: z.array(z.string()),
+    })
+    .nullable(),
+  // The pre-flight check that allowed this run (null when the runner was called without one, as the tests do).
+  preflight: z
+    .strictObject({
+      at: z.string(),
+      ok: z.boolean(),
+      checks: z.array(z.strictObject({ name: z.string(), status: z.enum(["passed", "failed", "skipped"]) })),
     })
     .nullable(),
   // Implicit findings: reported with the verdict, never part of it (manual: Definitions).

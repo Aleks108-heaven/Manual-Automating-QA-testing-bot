@@ -7,6 +7,12 @@ export type CheckStatus = (typeof CHECK_STATUSES)[number];
 
 export const PreflightReportSchema = z.strictObject({
   schema_version: z.literal(1),
+  /**
+   * run: the check before a run, which fails while the kill switch is engaged.
+   * resume: the check that shows the problem is fixed. It can be made while the switch is engaged, because
+   * otherwise nothing could ever resume it.
+   */
+  purpose: z.enum(["run", "resume"]),
   /** When the pre-flight finished. */
   at: z.string(),
   target: z.string(),

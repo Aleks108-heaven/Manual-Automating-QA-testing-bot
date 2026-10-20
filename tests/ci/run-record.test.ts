@@ -26,7 +26,8 @@ describe("run record v1", () => {
   it("describes a member run: session, budget, redaction, scan and artifacts", async () => {
     const config = testConfig();
     const { record, runDir } = await runScripted({ site, testCase: loadCase("cases/TC-ACCT-001.yaml"), script: "tests/ci/scripts/TC-ACCT-001.json", config, secrets: store });
-    expect(record.schema_version).toBe(2);
+    expect(record.schema_version).toBe(3);
+    expect(record.preflight).toBeNull(); // runCase was called directly, without the pre-flight check
     expect(record.verdict).toBe("PASS");
     expect(record.session).toEqual({ role: "member", mode: "per-case", established: true });
     expect(record.budget.used.tool_calls).toBe(2);

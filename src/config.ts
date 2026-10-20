@@ -128,6 +128,7 @@ export type Config = z.infer<typeof ConfigSchema>;
  *   QA_CANARY_CASES             comma-separated canary case files for the pre-flight check (empty means none)
  *   QA_REQUIRE_CANARIES=0       do not fail the pre-flight check when no canary case is configured
  *   QA_RUNNER_IMAGE_DIGEST      the digest of the container image the runner is in (set by the container script)
+ *   QA_REQUIRE_CONTAINER=1      require the pinned container image in the pre-flight check
  */
 export function loadConfig(path = "config/default.json", env: NodeJS.ProcessEnv = process.env): Config {
   const config = ConfigSchema.parse(JSON.parse(readFileSync(path, "utf8")));
@@ -141,6 +142,7 @@ export function loadConfig(path = "config/default.json", env: NodeJS.ProcessEnv 
   if (env["QA_CANARY_CASES"] !== undefined) config.preflight.canaryCases = env["QA_CANARY_CASES"].split(",").map((c) => c.trim()).filter(Boolean);
   if (env["QA_REQUIRE_CANARIES"] === "0") config.preflight.requireCanaries = false;
   if (env["QA_RUNNER_IMAGE_DIGEST"]) config.preflight.runnerImageDigest = env["QA_RUNNER_IMAGE_DIGEST"];
+  if (env["QA_REQUIRE_CONTAINER"] === "1") config.preflight.requireContainer = true;
   config.sessions.directory = config.sessions.directory.replace("${TMPDIR}", tmpdir());
   config.killSwitch.stateFile = config.killSwitch.stateFile.replace("${RUNS}", config.runs.directory);
   config.killSwitch.auditLog = config.killSwitch.auditLog.replace("${RUNS}", config.runs.directory);

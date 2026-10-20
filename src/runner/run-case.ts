@@ -7,6 +7,7 @@ import { runAgentLoop, type LoopResult } from "../agent/loop.ts";
 import { requestFinalOutput } from "./final-output.ts";
 import { ImplicitCollector } from "../implicit/collect.ts";
 import type { JudgeClient } from "../judge/client.ts";
+import type { PreflightReport } from "../preflight/report.ts";
 import { RunnerPausedError, type KillSwitch, type PauseSource } from "../ops/kill-switch.ts";
 import type { Config } from "../config.ts";
 import type { ModelClient } from "../model/client.ts";
@@ -52,6 +53,8 @@ export interface RunOptions {
   judge?: JudgeClient;
   /** The kill switch. A paused runner does not start, and a running run stops when it is engaged. */
   pause?: PauseSource;
+  /** The pre-flight report that allowed this run, if there was one. Recorded in the run record. */
+  preflight?: PreflightReport;
 }
 
 export interface RunResult {
@@ -268,7 +271,7 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
   });
 
   const record: RunRecord = RunRecordSchema.parse({
-    schema_version: 2,
+    schema_version: 3,
     run_id: runId,
     case: { id: testCase.id, title: testCase.title, priority: testCase.priority, source: options.caseSource },
     started_at: startedAt,
@@ -307,6 +310,7 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
       stop: loop?.budgetStop ?? finalBudgetStop ?? null,
     },
     blocked,
+    preflight: options.preflight ? { at: options.preflight.at, ok: options.preflight.ok, checks: options.preflight.checks.map((c) => ({ name: c.name, status: c.status })) } : null,
     implicit: implicit?.summary() ?? { enabled: config.implicit.enabled, findings: [], counts: { console_error: 0, http_error: 0, failed_request: 0, broken_image: 0, accessibility: 0 }, truncated: false },
     judge: {
       configured: options.judge !== undefined,

@@ -174,6 +174,7 @@ export class KillSwitch implements PauseSource {
     } catch {
       return refuse("the pre-flight report is not a valid report");
     }
+    if (report.purpose !== "resume") return refuse("the pre-flight report was not made for resuming (run the pre-flight command with --for-resume)");
     if (!report.ok || report.checks.some((c) => c.status !== "passed")) return refuse("the pre-flight report is not clean: every check must have passed, and none may be skipped");
     if (state.engaged_at && Date.parse(report.at) <= Date.parse(state.engaged_at)) return refuse("the pre-flight report is older than the engagement, so it does not show that the problem is fixed");
 

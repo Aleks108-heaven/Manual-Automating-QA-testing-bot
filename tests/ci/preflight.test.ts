@@ -104,6 +104,17 @@ describe("T9 each failing condition prevents the run, by name", () => {
     blocks(await runPreflight(build({ deps: { pause: { isPaused: () => true } } })), "runner is not paused", /kill switch is engaged/);
   });
 
+  it("a check made for resuming does not fail because the kill switch is engaged (otherwise nothing could resume it)", async () => {
+    const report = await runPreflight(build({ deps: { pause: { isPaused: () => true }, purpose: "resume" } }));
+    expect(report.purpose).toBe("resume");
+    expect(byName(report, "runner is not paused")).toMatchObject({ status: "passed" });
+    expect(report.ok).toBe(true);
+  });
+
+  it("a check made for a run records that purpose", async () => {
+    expect((await runPreflight(build())).purpose).toBe("run");
+  });
+
   it("the provider is down", async () => {
     blocks(await runPreflight(build({ deps: { provider: new ScriptedProviderStatus({ reachable: false }) } })), "provider reachable", /did not answer/);
   });

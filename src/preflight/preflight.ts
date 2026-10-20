@@ -32,6 +32,8 @@ export interface PreflightDeps {
   /** For tests: where the Dockerfile text comes from. */
   dockerfileText?: () => string | null;
   now?: () => Date;
+  /** "resume" is the check made to show a problem is fixed. It does not fail because the kill switch is engaged. */
+  purpose?: "run" | "resume";
 }
 
 interface CheckResult {
@@ -89,7 +91,12 @@ export async function runPreflight(deps: PreflightDeps): Promise<PreflightReport
   const allCases = [...deps.plannedCases, ...canaryCases];
   const roles = [...new Set(allCases.map((c) => c.role).filter((r) => r !== "none"))];
 
-  await record("runner is not paused", async () => (deps.pause?.isPaused() ? failed("the kill switch is engaged") : passed(deps.pause ? "the kill switch is not engaged" : "no kill switch is attached")));
+  const purpose = deps.purpose ?? "run";
+  await record("runner is not paused", async () => {
+    if (!deps.pause) return passed("no kill switch is attached");
+    if (!deps.pause.isPaused()) return passed("the kill switch is not engaged");
+    return purpose === "resume" ? passed("the kill switch is engaged, as expected: this check is for resuming it") : failed("the kill switch is engaged");
+  });
 
   await record("provider reachable", async () => {
     await deps.provider.ping();
@@ -190,6 +197,7 @@ export async function runPreflight(deps: PreflightDeps): Promise<PreflightReport
 
   const report = {
     schema_version: 1 as const,
+    purpose,
     at: clock().toISOString(),
     target: targetOrigin,
     ok: checks.every((c) => c.status === "passed"),

@@ -1,10 +1,14 @@
-// Command-line entry point. In M1 it runs one case against the local fixture site with a scripted
-// fake model, so no API key and no cost are involved.
+// Command-line entry point. It runs cases against the local fixture site with a scripted fake model, so no API
+// key and no cost are involved.
 //
 //   node src/cli.ts run cases/TC-FORM-001.yaml [--script <file>] [--defects a,b]
 //                        [--negative-control] [--mutate <expected id>] [--target <url>]
+//   node src/cli.ts preflight [--cases a.yaml,b.yaml] [--out <file>] [--target <url>]
+//   node src/cli.ts kill-switch status | engage | resume
 //
-// Exit codes: 0 PASS, 1 FAIL, 2 any other verdict (BLOCKED, INCONCLUSIVE, INCOMPLETE), 64 usage error.
+// Every run starts with the pre-flight check and refuses to start if the kill switch is engaged.
+// Exit codes: 0 PASS, 1 FAIL, 2 any other verdict (BLOCKED, INCONCLUSIVE, INCOMPLETE), 3 the run was refused
+// (kill switch engaged, or a pre-flight check failed), 64 usage error, 70 unexpected error.
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
@@ -13,13 +17,18 @@ import { negativeControl } from "./cases/mutate.ts";
 import { loadConfig } from "./config.ts";
 import { ScriptedJudge } from "./judge/scripted.ts";
 import { ScriptedModelClient } from "./model/scripted.ts";
-import { runCase } from "./runner/run-case.ts";
+import { KillSwitch, KillSwitchError, RunnerPausedError } from "./ops/kill-switch.ts";
+import { failedChecks } from "./preflight/preflight.ts";
+import { ScriptedProviderStatus } from "./preflight/provider.ts";
+import type { PreflightReport } from "./preflight/report.ts";
+import { orchestrateRun, PreflightFailedError, preflightFor } from "./runner/orchestrate.ts";
 import { StaticSecretStore } from "./secrets/store.ts";
 import { FIXTURE_SECRETS } from "../fixtures/secrets.ts";
 import type { RunRecord } from "./schemas/run-record.ts";
 import { assertKnownDefects, startFixtureSite, type FixtureSite } from "../fixtures/site/server.ts";
 
 const USAGE = `Usage: node src/cli.ts run <case.yaml> [options]
+       node src/cli.ts preflight [--cases a.yaml,b.yaml] [--out <file>] [--for-resume]
        node src/cli.ts kill-switch status
        node src/cli.ts kill-switch engage --by <name> --reason <text>
        node src/cli.ts kill-switch resume --by <name> --review <ref> --fix <ref> --preflight-report <file>
@@ -46,6 +55,67 @@ function isLoopback(url: string): boolean {
   } catch {
     return false;
   }
+}
+
+function printPreflight(report: PreflightReport): void {
+  console.log(`Pre-flight  ${report.at}  target ${report.target}`);
+  for (const c of report.checks) console.log(`  ${c.status.toUpperCase().padEnd(8)} ${c.name.padEnd(34)} ${c.detail}`);
+  const failed = failedChecks(report).length;
+  console.log(failed > 0 ? `  ${failed} check(s) failed: the run does not start.` : report.ok ? "  All checks passed." : "  No check failed. Some were skipped, so this report cannot be used to resume the kill switch.");
+  console.log();
+}
+
+/** Finds the target: an already running fixture (checked) or a new one. */
+async function resolveTarget(target: string | undefined, defects: string[]): Promise<{ targetOrigin: string; site: FixtureSite | null }> {
+  // Until M5 passes and the security review is done, the only allowed target is the local fixture site.
+  if (target && !isLoopback(target)) usage("The target must be the local fixture site (a loopback address). See CLAUDE.md.");
+  if (!target) {
+    const site = await startFixtureSite({ defects });
+    return { targetOrigin: site.origin, site };
+  }
+  const targetOrigin = new URL(target).origin;
+  // A loopback address is not enough: another local service (an admin panel, a database UI) is not the fixture.
+  const health = await fetch(`${targetOrigin}/health`, { signal: AbortSignal.timeout(3000) }).then((r) => r.json() as Promise<{ build?: string }>, () => null);
+  if (!health || typeof health.build !== "string" || !health.build.startsWith("fixture-")) {
+    usage(`${targetOrigin} does not identify itself as the fixture site (GET /health must report a build starting with "fixture-").`);
+  }
+  if (defects.length > 0) {
+    const config = loadConfig();
+    await fetch(`${targetOrigin}/__test/defects`, { method: "POST", headers: { "content-type": "application/json", ...config.testApi.headers }, body: JSON.stringify({ defects }) });
+  }
+  return { targetOrigin, site: null };
+}
+
+async function killSwitchCommand(action: string | undefined, v: { by?: string; reason?: string; review?: string; fix?: string; "preflight-report"?: string; target?: string }): Promise<number> {
+  const config = loadConfig();
+  const targetOrigin = v.target ? new URL(v.target).origin : "http://127.0.0.1:4173";
+  const ks = new KillSwitch({ config, targetOrigin });
+  try {
+    if (action === "status") {
+      const s = ks.status();
+      console.log(s.paused ? `PAUSED since ${s.engaged_at} by ${s.engaged_by}: ${s.reason}` : "Not engaged. The runner may run.");
+      if (s.revoked) console.log(`  Revoked: ${s.revoked.session_files_removed} session file(s) removed; ${s.revoked.calls.map((c) => `${c.call} ${c.ok ? "ok" : "FAILED"} (${c.detail})`).join("; ") || "no revoke calls configured"}`);
+      return 0;
+    }
+    if (action === "engage") {
+      const s = await ks.engage({ by: v.by ?? "", reason: v.reason ?? "" });
+      console.log(`PAUSED. Engaged ${s.engaged_at} by ${s.engaged_by}: ${s.reason}`);
+      if (s.revoked) console.log(`  Revoked: ${s.revoked.session_files_removed} session file(s) removed; ${s.revoked.calls.map((c) => `${c.call} ${c.ok ? "ok" : "FAILED"} (${c.detail})`).join("; ") || "no revoke calls configured"}`);
+      return 0;
+    }
+    if (action === "resume") {
+      await ks.resume({ by: v.by ?? "", review: v.review ?? "", fix: v.fix ?? "", preflightReport: v["preflight-report"] ?? "" });
+      console.log("Resumed. Access was restored, and the runner may run.");
+      return 0;
+    }
+  } catch (error) {
+    if (error instanceof KillSwitchError) {
+      console.error(error.message);
+      return 3;
+    }
+    throw error;
+  }
+  return usage("Expected: kill-switch status | engage | resume");
 }
 
 function printSummary(record: RunRecord, runDir: string, note: string | null): void {
@@ -106,12 +176,22 @@ async function main(): Promise<number> {
       "negative-control": { type: "boolean", default: false },
       mutate: { type: "string" },
       target: { type: "string" },
+      by: { type: "string" },
+      reason: { type: "string" },
+      review: { type: "string" },
+      fix: { type: "string" },
+      "preflight-report": { type: "string" },
+      cases: { type: "string" },
+      out: { type: "string" },
+      "for-resume": { type: "boolean", default: false },
       help: { type: "boolean", short: "h", default: false },
     },
   });
   if (values.help) usage();
   const [command, casePath] = positionals;
-  if (command !== "run" || !casePath) usage("Expected: run <case.yaml>");
+  if (command === "kill-switch") return killSwitchCommand(casePath, values);
+  if (command === "preflight") return preflightCommand(values);
+  if (command !== "run" || !casePath) usage("Expected: run <case.yaml>, preflight, or kill-switch status|engage|resume");
 
   let testCase;
   try {
@@ -146,45 +226,62 @@ async function main(): Promise<number> {
   } catch (error) {
     usage((error as Error).message);
   }
-  // Until M5 passes and the security review is done, the only allowed target is the local fixture site.
-  if (values.target && !isLoopback(values.target)) usage("In M1 the target must be the local fixture site (a loopback address). See CLAUDE.md.");
-
-  let site: FixtureSite | null = null;
-  let targetOrigin: string;
-  if (values.target) {
-    targetOrigin = new URL(values.target).origin;
-    // A loopback address is not enough: another local service (an admin panel, a database UI) is not the fixture.
-    const health = await fetch(`${targetOrigin}/health`, { signal: AbortSignal.timeout(3000) }).then((r) => r.json() as Promise<{ build?: string }>, () => null);
-    if (!health || typeof health.build !== "string" || !health.build.startsWith("fixture-")) {
-      usage(`${targetOrigin} does not identify itself as the fixture site (GET /health must report a build starting with "fixture-").`);
-    }
-    if (defects.length > 0) {
-      const config = loadConfig();
-      await fetch(`${targetOrigin}/__test/defects`, {
-        method: "POST",
-        headers: { "content-type": "application/json", ...config.testApi.headers },
-        body: JSON.stringify({ defects }),
-      });
-    }
-  } else {
-    site = await startFixtureSite({ defects });
-    targetOrigin = site.origin;
-  }
+  const { targetOrigin, site } = await resolveTarget(values.target, defects);
 
   try {
     const config = loadConfig();
-    const { record, runDir } = await runCase({
-      testCase,
+    const planned = testCase;
+    const { record, runDir, preflight } = await orchestrateRun({
+      testCase: planned,
       caseSource: casePath,
       targetOrigin,
-      model: ScriptedModelClient.fromFile(scriptPath),
-      ...(judgePath !== undefined ? { judge: ScriptedJudge.fromFile(judgePath) } : {}),
       config,
-      // In M1 and M2 the only valid target is the fixture site, whose credentials are fake.
+      // The only valid target is the fixture site, whose credentials are fake.
       secrets: new StaticSecretStore(FIXTURE_SECRETS),
+      // The canary cases use the same kind of model as the real run.
+      modelFor: (c) => ScriptedModelClient.fromFile(c.id === planned.id ? scriptPath : `tests/ci/scripts/${c.id}.json`),
+      ...(judgePath !== undefined ? { judge: ScriptedJudge.fromFile(judgePath) } : {}),
+      provider: new ScriptedProviderStatus(),
+      killSwitch: new KillSwitch({ config, targetOrigin }),
     });
+    printPreflight(preflight);
     printSummary(record, runDir, note);
     return record.verdict === "PASS" ? 0 : record.verdict === "FAIL" ? 1 : 2;
+  } catch (error) {
+    if (error instanceof PreflightFailedError) {
+      printPreflight(error.report);
+      console.error(error.message);
+      return 3;
+    }
+    if (error instanceof RunnerPausedError) {
+      console.error(error.message);
+      return 3;
+    }
+    throw error;
+  } finally {
+    await site?.close();
+  }
+}
+
+async function preflightCommand(values: { cases?: string; out?: string; target?: string; "for-resume"?: boolean }): Promise<number> {
+  const config = loadConfig();
+  const { targetOrigin, site } = await resolveTarget(values.target, []);
+  try {
+    const planned = (values.cases ?? "").split(",").map((c) => c.trim()).filter(Boolean).map((p) => loadCase(p));
+    const report = await preflightFor({
+      config,
+      targetOrigin,
+      secrets: new StaticSecretStore(FIXTURE_SECRETS),
+      modelFor: (c) => ScriptedModelClient.fromFile(`tests/ci/scripts/${c.id}.json`),
+      provider: new ScriptedProviderStatus(),
+      killSwitch: new KillSwitch({ config, targetOrigin }),
+      plannedCases: planned,
+      purpose: values["for-resume"] ? "resume" : "run",
+      ...(values.out ? { reportPath: values.out } : {}),
+    });
+    printPreflight(report);
+    console.log(`Report: ${values.out ?? join(config.runs.directory, "preflight-latest.json")}`);
+    return failedChecks(report).length > 0 ? 2 : 0;
   } finally {
     await site?.close();
   }
