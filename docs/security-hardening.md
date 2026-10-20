@@ -26,6 +26,14 @@ An earlier review said the browser sandbox was on. **That was wrong.** Playwrigh
 - **`npm audit` cannot run nested inside an npm script** on npm 12 with install scripts disabled. The supply-chain check is a small Node script that runs npm directly.
 - **Source scans** now guard against child processes, `eval`, disabled browser security features, and file writes outside the three modules that are meant to write (`tests/ci/isolation.test.ts`).
 
+## Added by milestone M4
+
+- **Undeclared state changes are blocked** at the request, websocket and first-redirect-hop level, with the fixture's own record proving that blocked requests never arrive (`tests/ci/mutation-blocking.test.ts`). This closes the part of "risky actions" that was only text before.
+- **The kill switch** pauses the runner, deletes its private session files, runs the configured revoke calls, and keeps an audit log. It fails closed when its state file is unreadable.
+- **The pre-flight check** refuses to start a run when the runner is paused, a secret or session is bad, the runner is not the pinned image, the target is unhealthy or the wrong build, or the canary pair does not behave. It would catch a bot that passes everything.
+- **Configuration rule:** a configuration that requires the container may not switch the canaries off.
+- Residual risks are in [m4-review.md](m4-review.md).
+
 ## Still open
 
 - Verify the container runner once Docker is running, and decide how to keep the browser sandbox on inside it (a seccomp profile, or an explicit and recorded exception).

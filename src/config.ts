@@ -146,5 +146,10 @@ export function loadConfig(path = "config/default.json", env: NodeJS.ProcessEnv 
   config.sessions.directory = config.sessions.directory.replace("${TMPDIR}", tmpdir());
   config.killSwitch.stateFile = config.killSwitch.stateFile.replace("${RUNS}", config.runs.directory);
   config.killSwitch.auditLog = config.killSwitch.auditLog.replace("${RUNS}", config.runs.directory);
-  return ConfigSchema.parse(config);
+  const checked = ConfigSchema.parse(config);
+  // A runner that must be the pinned container is a real environment. It may not also skip the canaries.
+  if (checked.preflight.requireContainer && (!checked.preflight.requireCanaries || checked.preflight.canaryCases.length === 0)) {
+    throw new Error("Invalid configuration: a configuration that requires the container runner must also require at least one canary case (preflight.requireCanaries and preflight.canaryCases).");
+  }
+  return checked;
 }

@@ -2,7 +2,7 @@
 
 A bot that executes written test cases in a browser and reports a verdict with evidence. The design is in [docs/manual/](docs/manual/00-index.md), and the build plan is in [docs/build-brief.md](docs/build-brief.md).
 
-**Status: milestones M1 (the thin slice), M2 (sessions, secrets, scrubbing, budgets) and M3 (the judge, implicit checks, validated output) are built.** The bot runs cases against a local fixture site with a *scripted fake model and judge*. No API key, no cost, and no real application is involved. A live model and judge, network-level mutation blocking, the golden set, the final report, and frozen scripts come in later milestones.
+**Status: milestones M1 to M4 are built** (the thin slice; sessions, secrets, scrubbing and budgets; the judge, implicit checks and validated output; undeclared-change blocking, the pre-flight check and the kill switch). The bot runs cases against a local fixture site with a *scripted fake model and judge*. No API key, no cost, and no real application is involved. A live model and judge, the golden set, the final report, and frozen scripts come in later milestones.
 
 ## Run it
 
@@ -25,7 +25,7 @@ npm run run-case -- cases/TC-AUTH-003.yaml --defects lockout-off-by-one   # the 
 
 Security checks: `npm run check:supply-chain` (known vulnerabilities and registry signatures, needs network), and `npm run ci` for a clean install plus all checks. The hardening log is in [docs/security-hardening.md](docs/security-hardening.md), and the runbooks are in [docs/runbooks/](docs/runbooks/).
 
-Exit codes: 0 for PASS, 1 for FAIL, 2 for BLOCKED, INCONCLUSIVE or INCOMPLETE, 64 for a usage error. Every run writes `runs/<run id>/run.json` and the evidence files (screenshots, page snapshots, network logs) that the runner captured. `runs/` is not committed.
+Exit codes: 0 for PASS, 1 for FAIL, 2 for BLOCKED, INCONCLUSIVE or INCOMPLETE, 3 when the run was refused (the kill switch is engaged, or a pre-flight check failed), 64 for a usage error. Every run writes `runs/<run id>/run.json` and the evidence files (screenshots, page snapshots, network logs) that the runner captured. `runs/` is not committed.
 
 Fixture defects you can turn on with `--defects`: `lockout-off-by-one`, `email-check-missing`, `wrong-email-message`.
 
@@ -35,9 +35,10 @@ If the negative control ever reports PASS, the bot is broken. Stop and fix it be
 
 The manual describes the finished bot, and some of it is not built. Do not rely on these until their milestone:
 
-- `allowed_mutations` in a case is read but **not enforced** (M4).
 - The judge is a scripted fake. A live judge needs the provider decision, and its prompt (`prompts/judge.v1.md`) has never been tried on a real model. The live ("Eval") halves of T6, T7 and T23 wait for that.
-- There is no pre-flight check and no kill switch (M4). The secret manager is an environment-variable store, and the real one is a decision still open.
+- The secret manager is an environment-variable store, and the real one is a decision still open. The provider status for the pre-flight check is a scripted fake, and the kill switch is a local file, which a shared runner cannot use.
+- The container runner has still never been built or run (Docker was not running). The pre-flight image check compares against its digest only when the configuration requires a container.
+- A chain of more than one redirect after a declared POST is noticed after the later request was sent, not before.
 - The only model is the scripted fake. No live model has been run, so the cost figures are computed from usage that the test scripts invent.
 - Sessions are made through the application's login API. A UI or single-sign-on login is not built.
 
@@ -50,6 +51,13 @@ Reviews: [docs/m1-review.md](docs/m1-review.md), [docs/m2-review.md](docs/m2-rev
 - **Scrubbing.** Everything the model is shown and everything stored is scrubbed of secrets, session tokens and credential headers. Screenshots cover password fields. The HAR is scrubbed, and there are no Playwright traces. A final scan of the stored files fails closed.
 - **Budgets and loop detection.** Tool calls, time and cost have limits, and a run that hits one is INCOMPLETE. The same action failing 3 times in a row (or repeated 8 times) is BLOCKED. Limits are in `config/default.json`.
 - **Run record v1** with the session, budget, redaction and scan sections. The CLI prints budget and scrub lines.
+
+## What M4 added
+
+- **Undeclared state changes are blocked.** A case lists the requests it may send that change state in `allowed_mutations` (`POST /api/orders`, `POST /graphql#CreateOrder`, `WS /socket`, `GET /logout`). Anything else is stopped before it reaches the server, the run ends INCONCLUSIVE, and the report names the request. A GraphQL query is not a state change; a mutation is, by operation name. The first redirect hop of a state-changing request is checked too.
+- **Every run starts with the pre-flight check.** Nine checks (not paused, provider, quota, secrets, sessions, runner image, target health, build, and the canary pair). Run it alone with `node src/cli.ts preflight`. A failed check stops the run with exit code 3.
+- **The kill switch.** `node src/cli.ts kill-switch engage --by <name> --reason <text>` pauses the runner at once, revokes its credentials, and logs it. Resuming needs a named review, a fix reference, and a clean pre-flight report made with `--for-resume`. See [docs/runbooks/kill-switch.md](docs/runbooks/kill-switch.md).
+- **Run record v3** records the pre-flight summary, and a new stop reason, `killed`, ends a run as INCOMPLETE.
 
 ## What M3 added
 
@@ -66,6 +74,9 @@ Check that nothing leaked, after any run: `Select-String -Path (Get-ChildItem ru
 
 | Test | Rule | File |
 | --- | --- | --- |
+| T9 | Pre-flight blocks the run, by name, for each failing condition | `tests/ci/preflight.test.ts`, `tests/ci/cli.test.ts` |
+| T11 | The kill switch pauses, revokes, and resumes only by the documented steps | `tests/ci/kill-switch.test.ts`, `tests/ci/cli.test.ts` |
+| T16 | Undeclared state changes are blocked, declared ones are allowed | `tests/ci/mutations.test.ts`, `tests/ci/mutation-blocking.test.ts` |
 | T7 | A missing element is BLOCKED, with the step and a screenshot | `tests/ci/blocked.test.ts` |
 | T8 | Malformed model output is rejected and retried, never repaired | `tests/ci/model-output.test.ts` |
 | T18 | Verdict precedence: every row, every combination, and the manual's table | `tests/ci/verdict-table.test.ts` |

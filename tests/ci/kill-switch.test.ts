@@ -122,6 +122,20 @@ describe("T11 engaging the kill switch", () => {
     expect(new KillSwitch({ config, targetOrigin: site.origin }).isPaused()).toBe(true);
   });
 
+  it("a state file that cannot be read cannot be resumed, but engaging again repairs it", async () => {
+    const config = testConfig();
+    mkdirSync(dirname(config.killSwitch.stateFile), { recursive: true });
+    writeFileSync(config.killSwitch.stateFile, "{ this is not json");
+    const ks = new KillSwitch({ config, targetOrigin: site.origin });
+    expect(ks.status()).toMatchObject({ paused: true, corrupt: true });
+    await expect(ks.resume({ by: "sam", review: "R", fix: "F", preflightReport: saveReport(config, goodReport(later())) })).rejects.toThrow(/unreadable/);
+    const repaired = await ks.engage({ by: "alex", reason: "the state file was damaged" });
+    expect(repaired.corrupt).toBeUndefined();
+    expect(repaired.engaged_by).toBe("alex");
+    await ks.resume({ by: "sam", review: "R", fix: "F", preflightReport: saveReport(config, goodReport(later())) });
+    expect(ks.isPaused()).toBe(false);
+  });
+
   it("still pauses when a revoke call fails, and says so", async () => {
     const config = testConfig((c) => {
       c.killSwitch.revokeCalls = [{ call: "POST /__test/no-such-revoke" }];
@@ -274,6 +288,7 @@ describe("T11 resuming follows the documented steps", () => {
     expect(log[0]).toMatchObject({ by: "alex", reason: "an incident" });
     expect(log[2]).toMatchObject({ by: "sam", why: expect.stringContaining("completed review") });
     expect(log[4]).toMatchObject({ by: "sam", review: "REVIEW-12", fix: "PR-34" });
+    expect(log[4]?.["preflight_report_sha256"]).toMatch(/^[0-9a-f]{64}$/); // which exact report was accepted
     for (const entry of log) expect(typeof entry["at"]).toBe("string");
   });
 });

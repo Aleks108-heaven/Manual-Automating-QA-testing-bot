@@ -123,6 +123,8 @@ Case files live in `cases/`, one YAML file per case, named after the case ID. Th
 
 **Implicit checks.** The runner also looks for things nobody wrote an expected result for: console errors, HTTP responses of 400 or more (except ones the case itself expects with a `status` entry), failed requests, images that did not load, and accessibility violations found by automated rules (once per page). They are listed in the report and the run record with the step and page where they were first seen. In version 1 they never change the verdict. They are never MATCH or MISMATCH, and they are not a substitute for an accessibility audit.
 
+**Declaring state changes.** `allowed_mutations` lists every request the case may make that changes state, and the tool layer blocks everything else (see the Guardrails page for the exact rules). Write it as `POST /api/orders`, `PUT /api/orders/*`, `POST /graphql#CreateOrder`, `WS /socket`, or `GET /logout`. If the case clicks a button that sends a request, the request has to be in the list. Declare only what the case needs, because every entry is a request the bot is allowed to send. A request that is declared but not made is fine. A request that is made but not declared ends the run as INCONCLUSIVE, and the report names it.
+
 **Addressing elements.** `where` takes either `{role, name}` (the accessible role and exact accessible name) or `{selector}` (a CSS selector). Some elements have no accessible role, such as password fields, and need a selector. A locator that matches more than one element is an error for `element_state`, so make it specific.
 
 Pair it with TC-AUTH-003, where the 4th failed attempt must not lock the account, so the boundary is covered on both sides.

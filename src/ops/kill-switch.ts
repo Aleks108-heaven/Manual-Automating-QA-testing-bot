@@ -4,6 +4,7 @@
 // fixture, a test endpoint that ends all sessions and disables the bot accounts). Resuming needs a named reviewer,
 // a fix reference, and a clean pre-flight report that is newer than the engagement. Every action is written to an
 // append-only audit log, including the ones that were refused.
+import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type { Config } from "../config.ts";
@@ -32,6 +33,8 @@ export interface RevokeResult {
 
 export interface KillSwitchState {
   paused: boolean;
+  /** True when the state file could not be read. The runner stays paused, and engaging again repairs the file. */
+  corrupt?: boolean;
   engaged_at?: string;
   engaged_by?: string;
   reason?: string;
@@ -72,7 +75,7 @@ export class KillSwitch implements PauseSource {
       return JSON.parse(readFileSync(this.stateFile, "utf8")) as KillSwitchState;
     } catch {
       // A state file that cannot be read is treated as engaged. Failing closed is the safe direction.
-      return { paused: true, reason: "the kill-switch state file is unreadable", engaged_by: "unknown" };
+      return { paused: true, corrupt: true, reason: "the kill-switch state file is unreadable", engaged_by: "unknown" };
     }
   }
 
@@ -130,7 +133,8 @@ export class KillSwitch implements PauseSource {
       throw new KillSwitchError(`${by} is not a kill-switch holder (${holders.join(", ")}).`);
     }
     const existing = this.status();
-    if (existing.paused) {
+    // A state file that cannot be read keeps the runner paused, and engaging again writes a good one.
+    if (existing.paused && !existing.corrupt) {
       this.audit({ action: "engage-ignored", by, reason, why: "already engaged" });
       return existing;
     }
@@ -163,6 +167,7 @@ export class KillSwitch implements PauseSource {
     };
     const state = this.status();
     if (!state.paused) return refuse("the kill switch is not engaged");
+    if (state.corrupt) return refuse("the kill-switch state file is unreadable, so the time of the pause is unknown. Engage the kill switch again to repair it, then resume");
     if (!args.by.trim()) return refuse("say who is resuming (--by)");
     if (!args.review.trim()) return refuse("a completed review is required (--review <reference>)");
     if (!args.fix.trim()) return refuse("a verified fix is required (--fix <reference>)");
@@ -189,7 +194,10 @@ export class KillSwitch implements PauseSource {
 
     const next: KillSwitchState = { paused: false, resumed_at: this.now().toISOString(), resumed_by: args.by.trim() };
     this.write(next);
-    this.audit({ action: "resume", by: args.by.trim(), review: args.review.trim(), fix: args.fix.trim(), preflight_report: args.preflightReport });
+    // The hash ties the audit entry to the exact report that was accepted. The report is not signed, so a hand-written
+    // one would be accepted. The hash at least shows afterwards which file it was.
+    const reportHash = createHash("sha256").update(readFileSync(args.preflightReport)).digest("hex");
+    this.audit({ action: "resume", by: args.by.trim(), review: args.review.trim(), fix: args.fix.trim(), preflight_report: args.preflightReport, preflight_report_sha256: reportHash });
     return next;
   }
 }
