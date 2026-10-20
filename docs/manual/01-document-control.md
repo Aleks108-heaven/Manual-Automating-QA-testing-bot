@@ -1,10 +1,10 @@
 ## Document control
 
-This manual governs the QA automation bot from the pilot onward, and version 0.8 covers the pages needed before the pilot starts.
+This manual governs the QA automation bot from the pilot onward, and version 0.9 covers the pages needed before the pilot starts.
 
 | Field | Value |
 | --- | --- |
-| Manual version | 0.8 (draft) |
+| Manual version | 0.9 (draft) |
 | Status | Draft, revised after two AI design reviews. These are not the human independent review that stage changes and the pilot-readiness review require |
 | Applies to bot version | [to fill: release or commit] |
 | Manual owner | [to fill: name or role] |
@@ -27,5 +27,6 @@ Three rules keep the manual trustworthy. A bot change is not finished until this
 | 20 Oct 2026 | 0.6 | Milestone M2 built. Roles and per-case sessions made by the runner, `fill_secret` by data key, scrubbing of everything the model sees and everything stored, masked screenshots, a scrubbed HAR and no traces, a final scan of stored files that fails closed, budgets for tool calls, time and cost, and runner-side loop detection. The run record is schema version 1 | [to fill] |
 | 20 Oct 2026 | 0.7 | Milestone M3 built. The judge, as a separate client that sees only runner-captured evidence, with its answer checked in code and an injection report giving NO_EVIDENCE. Implicit checks (console, HTTP, failed requests, images, accessibility), reported only. The model's final report is validated and retried within budget and never repaired. A BLOCKED run records the step, reason and a runner-captured screenshot. The precedence table is kept as data and compared with this manual by a test. The run record is schema version 2 | [to fill] |
 | 20 Oct 2026 | 0.8 | Milestone M4 built. Undeclared state changes are blocked (non-GET requests, GraphQL mutations by operation name, websocket sends, state-changing GETs, and the first redirect hop), with a visible declaration syntax. The pre-flight check runs before every run, with a canary pair. The kill switch is built and its steps are written down, including what resuming needs. The kill switch is a new stop reason in precedence row 5. The Roles page kill-switch paragraph is filled in. The run record is schema version 3 | [to fill] |
+| 20 Oct 2026 | 0.9 | Milestone M5 built. The mutant eval, the golden set and the injection eval, as commands with reports and exact 95% bounds. `text_visible` gains `exact: true` after the mutant eval showed that a substring check misses a changed message. Definitions gain mutant, equivalent mutant and coverage gap. Resuming the kill switch also needs a clean golden-set report. A runbook for the golden set was added. The Pilot page says what scripted runs of these suites do and do not show | [to fill] |
 
 This log is append-only. Do not edit earlier entries.

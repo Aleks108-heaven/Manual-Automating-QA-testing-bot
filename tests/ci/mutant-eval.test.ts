@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadCase } from "../../src/cases/load.ts";
-import { evaluateMutants, formatMutantReport, type MutantEvalOptions } from "../../src/eval/mutants.ts";
+import { evaluateMutants, formatMutantReport, type MutantEvalOptions } from "../../evals/mutants.ts";
 import { ScriptedModelClient } from "../../src/model/scripted.ts";
 import { KillSwitch, RunnerPausedError } from "../../src/ops/kill-switch.ts";
 import type { TestCase } from "../../src/schemas/case.ts";

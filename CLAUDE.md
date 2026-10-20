@@ -25,6 +25,7 @@ Open only the page you need. Do not read the whole manual every session.
 - Pin exact dependency versions. No floating tags such as @latest.
 - Never hard-code values marked [to fill] in the manual. Read them from config/.
 - Target only the local fixture site. No real credentials, no production URLs.
+- An eval suite must be able to fail: add a test that a broken bot is flagged before trusting a clean report. Defects with no covering case are coverage gaps, not misses.
 
 ## Commands
 
@@ -32,7 +33,7 @@ Open only the page you need. Do not read the whole manual every session.
 - Run CI tests: `npm run test:ci`
 - Run one test file: `npx vitest run --config vitest.config.ts tests/ci/<file>.test.ts`
 - Run a case: `npm run run-case -- cases/TC-FORM-001.yaml` (add `--negative-control` or `--defects <name>`)
-- Run the eval suite: not built yet (live-model scenarios start in M3 to M5)
+- Eval suites (fixture only, scripted model until a provider is chosen): `node src/cli.ts golden`, `node src/cli.ts eval mutants [--sample N]`, `node src/cli.ts eval injection [--runs N]`. Scripted results test the machinery and never fill a pilot gate. The golden set must be signed by a person; never edit an expected verdict or rehash to turn a red run green without reading what moved (docs/runbooks/golden-set.md)
 - Type check, pin check and CI tests together: `npm run check`
 - Supply chain (needs network): `npm run check:supply-chain`. Clean install plus check: `npm run ci`
 - Locked-down container run (verify first, see docs/runbooks/container-runner.md): `npm run container:run`

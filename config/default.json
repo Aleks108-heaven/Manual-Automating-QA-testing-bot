@@ -28,6 +28,7 @@
     "stateFile": "${RUNS}/.kill-switch.json",
     "auditLog": "${RUNS}/.kill-switch-audit.jsonl",
     "holders": [],
+    "requireGoldenRun": true,
     "revokeCalls": [{ "call": "POST /__test/revoke", "description": "End every session and disable the bot accounts (fixture)" }],
     "restoreCalls": [{ "call": "POST /__test/restore", "description": "Enable the bot accounts again (fixture)" }]
   },
@@ -89,6 +90,8 @@
   "evals": {
     "assertionTimeoutMs": 1500,
     "keepRuns": "problems",
+    "golden": { "file": "golden/golden-set.json" },
+    "injection": { "runs": 20, "maxFailureUpperBound": 0.15 },
     "mutants": {
       "minDetectionRate": 0.95,
       "minDecisiveRate": 0.95,

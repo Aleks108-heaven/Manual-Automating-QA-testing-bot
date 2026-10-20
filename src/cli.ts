@@ -6,6 +6,8 @@
 //   node src/cli.ts preflight [--cases a.yaml,b.yaml] [--out <file>] [--target <url>]
 //   node src/cli.ts kill-switch status | engage | resume
 //   node src/cli.ts eval mutants [--sample N] [--repeat R]
+//   node src/cli.ts eval injection [--runs N]
+//   node src/cli.ts golden [--for-resume] | golden rehash
 //
 // Every run starts with the pre-flight check and refuses to start if the kill switch is engaged.
 // Exit codes: 0 PASS, 1 FAIL, 2 any other verdict (BLOCKED, INCONCLUSIVE, INCOMPLETE), 3 the run was refused
@@ -16,7 +18,9 @@ import { parseArgs } from "node:util";
 import { CaseValidationError, loadCase } from "./cases/load.ts";
 import { negativeControl } from "./cases/mutate.ts";
 import { loadConfig } from "./config.ts";
-import { evaluateMutants, formatMutantReport } from "./eval/mutants.ts";
+import { formatGoldenReport, GoldenSetError, rehashGoldenSet, runGoldenSet } from "../evals/golden.ts";
+import { evaluateInjection, formatInjectionReport } from "../evals/injection.ts";
+import { evaluateMutants, formatMutantReport } from "../evals/mutants.ts";
 import { ScriptedJudge } from "./judge/scripted.ts";
 import { ScriptedModelClient } from "./model/scripted.ts";
 import { KillSwitch, KillSwitchError, RunnerPausedError } from "./ops/kill-switch.ts";
@@ -27,14 +31,18 @@ import { orchestrateRun, PreflightFailedError, preflightFor } from "./runner/orc
 import { StaticSecretStore } from "./secrets/store.ts";
 import { FIXTURE_SECRETS } from "../fixtures/secrets.ts";
 import type { RunRecord } from "./schemas/run-record.ts";
+import { startOutsideServer } from "../fixtures/outside-server.ts";
 import { assertKnownDefects, startFixtureSite, type FixtureSite } from "../fixtures/site/server.ts";
 
 const USAGE = `Usage: node src/cli.ts run <case.yaml> [options]
        node src/cli.ts preflight [--cases a.yaml,b.yaml] [--out <file>] [--for-resume]
        node src/cli.ts eval mutants [--sample N] [--repeat R] [--out-dir <dir>]
+       node src/cli.ts eval injection [--runs N] [--out-dir <dir>]
+       node src/cli.ts golden [--file <set>] [--out-dir <dir>] [--for-resume]
+       node src/cli.ts golden rehash [--file <set>]
        node src/cli.ts kill-switch status
        node src/cli.ts kill-switch engage --by <name> --reason <text>
-       node src/cli.ts kill-switch resume --by <name> --review <ref> --fix <ref> --preflight-report <file>
+       node src/cli.ts kill-switch resume --by <name> --review <ref> --fix <ref> --preflight-report <file> --golden-report <file>
 
 Options:
   --script <file>        Scripted model actions (default: tests/ci/scripts/<case id>.json)
@@ -89,7 +97,7 @@ async function resolveTarget(target: string | undefined, defects: string[]): Pro
   return { targetOrigin, site: null };
 }
 
-async function killSwitchCommand(action: string | undefined, v: { by?: string; reason?: string; review?: string; fix?: string; "preflight-report"?: string; target?: string }): Promise<number> {
+async function killSwitchCommand(action: string | undefined, v: { by?: string; reason?: string; review?: string; fix?: string; "preflight-report"?: string; "golden-report"?: string; target?: string }): Promise<number> {
   const config = loadConfig();
   const targetOrigin = v.target ? new URL(v.target).origin : "http://127.0.0.1:4173";
   const ks = new KillSwitch({ config, targetOrigin });
@@ -107,7 +115,7 @@ async function killSwitchCommand(action: string | undefined, v: { by?: string; r
       return 0;
     }
     if (action === "resume") {
-      await ks.resume({ by: v.by ?? "", review: v.review ?? "", fix: v.fix ?? "", preflightReport: v["preflight-report"] ?? "" });
+      await ks.resume({ by: v.by ?? "", review: v.review ?? "", fix: v.fix ?? "", preflightReport: v["preflight-report"] ?? "", ...(v["golden-report"] !== undefined ? { goldenReport: v["golden-report"] } : {}) });
       console.log("Resumed. Access was restored, and the runner may run.");
       return 0;
     }
@@ -184,12 +192,15 @@ async function main(): Promise<number> {
       review: { type: "string" },
       fix: { type: "string" },
       "preflight-report": { type: "string" },
+      "golden-report": { type: "string" },
       cases: { type: "string" },
       out: { type: "string" },
       "for-resume": { type: "boolean", default: false },
       sample: { type: "string" },
       repeat: { type: "string" },
+      runs: { type: "string" },
       "out-dir": { type: "string" },
+      file: { type: "string" },
       help: { type: "boolean", short: "h", default: false },
     },
   });
@@ -198,6 +209,7 @@ async function main(): Promise<number> {
   if (command === "kill-switch") return killSwitchCommand(casePath, values);
   if (command === "preflight") return preflightCommand(values);
   if (command === "eval") return evalCommand(casePath, values);
+  if (command === "golden") return goldenCommand(casePath, values);
   if (command !== "run" || !casePath) usage("Expected: run <case.yaml>, preflight, or kill-switch status|engage|resume");
 
   let testCase;
@@ -302,10 +314,44 @@ function positiveInt(name: string, text: string | undefined): number | undefined
 }
 
 /** The eval suites. They run against the fixture site only, and they stop when the kill switch is engaged. */
-async function evalCommand(suite: string | undefined, values: { sample?: string; repeat?: string; "out-dir"?: string; target?: string }): Promise<number> {
-  if (suite !== "mutants") return usage("Expected: eval mutants [--sample N] [--repeat R] [--out-dir <dir>]");
+async function evalCommand(suite: string | undefined, values: { sample?: string; repeat?: string; runs?: string; "out-dir"?: string; target?: string }): Promise<number> {
+  if (suite !== "mutants" && suite !== "injection") return usage("Expected: eval mutants [--sample N] [--repeat R] [--out-dir <dir>] | eval injection [--runs N] [--out-dir <dir>]");
   if (values.target) usage("The eval suites start their own fixture site, so --target is not allowed.");
   const config = loadConfig();
+  const progress = (done: number, total: number) => {
+    if (done % 25 === 0 || done === total) console.error(`  ${done} of ${total}`);
+  };
+
+  if (suite === "injection") {
+    const runs = positiveInt("runs", values.runs);
+    const outside = await startOutsideServer();
+    const site = await startFixtureSite({ outsideOrigin: outside.origin });
+    const outDir = values["out-dir"] ?? join(config.runs.directory, "eval", "injection");
+    try {
+      const report = await evaluateInjection({
+        config,
+        site,
+        outside,
+        outDir,
+        pause: new KillSwitch({ config, targetOrigin: site.origin }),
+        ...(runs !== undefined ? { runs } : {}),
+        onProgress: progress,
+      });
+      console.log(formatInjectionReport(report));
+      console.log(`\nReport: ${join(outDir, "injection-eval-latest.json")}`);
+      return report.ok ? 0 : 2;
+    } catch (error) {
+      if (error instanceof RunnerPausedError) {
+        console.error(error.message);
+        return 3;
+      }
+      throw error;
+    } finally {
+      await site.close();
+      await outside.close();
+    }
+  }
+
   const sample = positiveInt("sample", values.sample);
   const repeat = positiveInt("repeat", values.repeat);
   const { targetOrigin, site } = await resolveTarget(undefined, []);
@@ -318,9 +364,7 @@ async function evalCommand(suite: string | undefined, values: { sample?: string;
       pause: new KillSwitch({ config, targetOrigin }),
       ...(sample !== undefined ? { sample } : {}),
       ...(repeat !== undefined ? { repeat } : {}),
-      onProgress: (done, total) => {
-        if (done % 25 === 0 || done === total) console.error(`  ${done} of ${total} runs`);
-      },
+      onProgress: progress,
     });
     console.log(formatMutantReport(report));
     console.log(`\nReport: ${join(outDir, "mutant-eval-latest.json")}`);
@@ -329,6 +373,49 @@ async function evalCommand(suite: string | undefined, values: { sample?: string;
     if (error instanceof RunnerPausedError) {
       console.error(error.message);
       return 3;
+    }
+    throw error;
+  } finally {
+    await site?.close();
+  }
+}
+
+/**
+ * The golden set: verdicts frozen by a person. `golden` runs it and reports drift. `golden rehash` records the current
+ * hashes of the case files and scripts after a person has reviewed a deliberate change. It never changes an expected verdict.
+ */
+async function goldenCommand(action: string | undefined, values: { file?: string; "out-dir"?: string; "for-resume"?: boolean; target?: string }): Promise<number> {
+  const config = loadConfig();
+  const file = values.file ?? config.evals.golden.file;
+  if (action === "rehash") {
+    const changed = rehashGoldenSet(file);
+    console.log(`Recorded the current inputs of ${changed} entr${changed === 1 ? "y" : "ies"} in ${file}. A person must review this change like any other change to the golden set.`);
+    return 0;
+  }
+  if (action !== undefined) return usage("Expected: golden [--file <set>] [--out-dir <dir>] [--for-resume] | golden rehash [--file <set>]");
+  if (values.target) usage("The golden set starts its own fixture site, so --target is not allowed.");
+  const { targetOrigin, site } = await resolveTarget(undefined, []);
+  const outDir = values["out-dir"] ?? join(config.runs.directory, "eval", "golden");
+  try {
+    const report = await runGoldenSet({
+      config,
+      site: site!,
+      outDir,
+      file,
+      purpose: values["for-resume"] ? "resume" : "run",
+      pause: new KillSwitch({ config, targetOrigin }),
+    });
+    console.log(formatGoldenReport(report));
+    console.log(`\nReport: ${join(outDir, "golden-latest.json")}`);
+    return report.ok ? 0 : 2;
+  } catch (error) {
+    if (error instanceof RunnerPausedError) {
+      console.error(error.message);
+      return 3;
+    }
+    if (error instanceof GoldenSetError) {
+      console.error(error.message);
+      return 64;
     }
     throw error;
   } finally {

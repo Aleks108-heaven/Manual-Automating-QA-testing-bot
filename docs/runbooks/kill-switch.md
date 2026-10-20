@@ -31,16 +31,17 @@ You need three things:
 
 1. **A completed review** of what happened, with a reference (a ticket or a document).
 2. **A verified fix** with a reference (a change or a pull request), checked by someone other than the person who wrote it.
-3. **A clean run:** a pre-flight report made after the fix, for resuming, in which every check passed and none was skipped. This includes the canary pair: the known-good case must PASS and its negative control must FAIL.
+3. **A clean run:** a pre-flight report made after the fix, for resuming, in which every check passed and none was skipped (this includes the canary pair: the known-good case must PASS and its negative control must FAIL), and a golden-set report made after the fix, for resuming, in which no frozen verdict moved.
 
 ```powershell
 node src/cli.ts preflight --for-resume --out resume-report.json --target <the target's address>
-node src/cli.ts kill-switch resume --by "<your name>" --review "<review reference>" --fix "<fix reference>" --preflight-report resume-report.json --target <the target's address>
+node src/cli.ts golden --for-resume --out-dir resume-golden
+node src/cli.ts kill-switch resume --by "<your name>" --review "<review reference>" --fix "<fix reference>" --preflight-report resume-report.json --golden-report resume-golden/golden-latest.json --target <the target's address>
 ```
 
-`--for-resume` lets the pre-flight check run while the switch is still engaged. The resume command refuses, and logs the refusal, if the switch is not engaged, if any of the three is missing, if the report is not clean, if it was not made for resuming, or if it is older than the pause. It restores access first (`killSwitch.restoreCalls`), and if that fails the runner stays paused. Only then does it clear the pause.
+`--for-resume` lets the pre-flight check run while the switch is still engaged. The resume command refuses, and logs the refusal, if the switch is not engaged, if any of the three is missing, if a report is not clean, if it was not made for resuming, or if it is older than the pause. The audit log records the hash of both reports. It restores access first (`killSwitch.restoreCalls`), and if that fails the runner stays paused. Only then does it clear the pause.
 
-When the golden set exists (milestone M5), a clean golden-set run is also required.
+The golden-set requirement is `killSwitch.requireGoldenRun` in the configuration, on by default. The golden set must have been signed by a person ([golden set runbook](golden-set.md)); an unsigned set can never be clean, so a runner with no signed golden set cannot be resumed until one exists.
 
 ## Drill
 

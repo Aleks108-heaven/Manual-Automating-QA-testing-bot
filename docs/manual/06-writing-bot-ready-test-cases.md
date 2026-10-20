@@ -26,11 +26,13 @@ A case is bot-ready when a stranger could decide pass or fail from the written e
 
 Every entry has two more fields. `id` (for example `e1`) is unique within the case, and the actor's observations refer to it. `after_step` is the step number after which the runner evaluates the entry, waiting and retrying up to a timeout, so a message that disappears later is still caught. The runner captures the evidence at that moment. The actor does not choose it.
 
+**Contains or exact.** A `text_visible` entry passes when the element's text contains the given text. That is right for a long message of which you only care about one phrase, and wrong for an error message: "Enter a valid email." still contains "Enter a valid email", so a changed message passes. Set `exact: true` when the element holds the whole message. Then the text of the element, with white space collapsed the way a browser shows it and the ends trimmed, must equal the given text, character for character. Differences in capitals, punctuation, and added or missing words are all caught. A double space is not, because a user cannot see it. The mutant eval measured this: with the substring check, a message with a full stop added went unnoticed.
+
 If the locator in `where` matches nothing, a `text_visible` or `element_state` entry gets MISMATCH, and triage routes it to the case curator when the locator is stale. A `count` entry of 0 passes when nothing matches.
 
 | Kind | Fields | Checked by |
 | --- | --- | --- |
-| text_visible | where (role and name, or selector), text | Assertion |
+| text_visible | where (role and name, or selector), text, and optionally `exact: true` | Assertion |
 | url | equals or matches | Assertion |
 | status | request pattern, status code | Assertion on the network log |
 | count | where, expected number | Assertion |

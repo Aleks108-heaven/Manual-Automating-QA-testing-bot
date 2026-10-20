@@ -64,4 +64,7 @@ A run that is not PASS needs a person before release when the case is P1. This i
 | Drift | A change in bot behavior caused by the model, prompts, tools, browser, or app rather than by a defect |
 | Decisive rate | The share of runs that end in PASS or FAIL rather than BLOCKED, INCONCLUSIVE, or INCOMPLETE |
 | Outcome | The result for one expected result: MATCH, MISMATCH, or NO_EVIDENCE |
+| Mutant | The fixture application with exactly one defect switched on. The mutant eval measures whether the bot notices it |
+| Equivalent mutant | A mutant that changes nothing a user or a case can see (a changed white space, or the correct value). It can never be a miss, so it is left out of the denominator |
+| Coverage gap | A defect that no case checks. The case set is at fault, not the bot, so it is listed apart from misses |
 | Frozen script | A deterministic script exported from a proven case and run without an LLM. It is versioned, and only a human may change it |

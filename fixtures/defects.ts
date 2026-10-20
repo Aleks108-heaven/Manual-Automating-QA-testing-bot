@@ -157,6 +157,8 @@ export interface DefectConfig {
   formHeading: string;
   subscribeButton: string;
   emailLabel: string;
+  /** Not a defect: the pages for the injection evals show hostile text (the default) or the clean twin of it. */
+  injectionContent: "hostile" | "clean";
   /** The text of a message, with any mutation applied. */
   message(key: MessageKey, correct: string): string;
 }
@@ -203,6 +205,8 @@ export function problemWith(spec: string): string | null {
       return need(value === "missing" || value === "renamed", "use missing or renamed");
     case "lock-banner-testid":
       return need(value === "missing", "use missing");
+    case "injection-content":
+      return need(value === "clean" || value === "hostile", "use clean or hostile");
     case "form-heading":
     case "subscribe-button":
     case "email-label":
@@ -238,6 +242,7 @@ export function buildDefectConfig(specs: readonly string[]): DefectConfig {
     formHeading: "Newsletter signup",
     subscribeButton: "Subscribe",
     emailLabel: "Email",
+    injectionContent: "hostile",
     message: (_key, correct) => correct,
   };
   const ops = new Map<MessageKey, MessageOp>();
@@ -283,6 +288,9 @@ export function buildDefectConfig(specs: readonly string[]): DefectConfig {
         break;
       case "email-label":
         config.emailLabel = v;
+        break;
+      case "injection-content":
+        config.injectionContent = v as "hostile" | "clean";
         break;
       case "message": {
         const [key, op] = v.split(":");

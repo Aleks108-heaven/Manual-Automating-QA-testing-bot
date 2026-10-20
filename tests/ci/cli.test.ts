@@ -1,6 +1,6 @@
 // The command-line entry point: the same thin slice as T17, run the way a person runs it.
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -195,7 +195,22 @@ describe("operations: pre-flight and the kill switch", () => {
       expect(ready.code).toBe(0);
       expect(ready.out).toContain("All checks passed.");
 
-      const resumed = await cliAsync("kill-switch", ["resume", "--by", "sam", "--review", "REVIEW-1", "--fix", "PR-2", "--preflight-report", reportPath, ...target], runs);
+      // The golden set needs a person's name in it before it counts. This copy is signed by the test.
+      const signed = join(runs, "golden-signed.json");
+      const set = JSON.parse(readFileSync("golden/golden-set.json", "utf8")) as { frozen_by: string };
+      writeFileSync(signed, JSON.stringify({ ...set, frozen_by: "test reviewer" }));
+      const goldenPath = join(runs, "golden-report.json");
+
+      const noGolden = await cliAsync("kill-switch", ["resume", "--by", "sam", "--review", "REVIEW-1", "--fix", "PR-2", "--preflight-report", reportPath, ...target], runs);
+      expect(noGolden.code).toBe(3);
+      expect(noGolden.err).toContain("golden-set report is required");
+
+      const golden = await cliAsync("golden", ["--for-resume", "--file", signed, "--out-dir", join(runs, "golden")], runs);
+      expect(golden.out).toContain("Clean: nothing moved.");
+      expect(golden.code).toBe(0);
+      copyFileSync(join(runs, "golden", "golden-latest.json"), goldenPath);
+
+      const resumed = await cliAsync("kill-switch", ["resume", "--by", "sam", "--review", "REVIEW-1", "--fix", "PR-2", "--preflight-report", reportPath, "--golden-report", goldenPath, ...target], runs);
       expect(resumed.code).toBe(0);
       expect(resumed.out).toContain("Resumed");
 
@@ -204,7 +219,7 @@ describe("operations: pre-flight and the kill switch", () => {
       expect(again.out).toContain("Verdict: PASS");
 
       const audit = readFileSync(join(runs, ".kill-switch-audit.jsonl"), "utf8").trim().split("\n").map((l) => (JSON.parse(l) as { action: string }).action);
-      expect(audit).toEqual(["engage", "revoke", "resume-refused", "restore", "resume"]);
+      expect(audit).toEqual(["engage", "revoke", "resume-refused", "resume-refused", "restore", "resume"]);
     } finally {
       await site.close();
     }

@@ -1,0 +1,9 @@
+{
+  "case_id": "TC-ACCT-001",
+  "steps": [[{ "tool": "goto", "args": { "url": "/account" } }, { "tool": "snapshot", "args": {} }]],
+  "observations": [
+    { "expected_ref": "e1", "observed": "Welcome, fixture_member", "evidence": [] },
+    { "expected_ref": "e2", "observed": "visible", "evidence": [] },
+    { "expected_ref": "e3", "observed": "/account", "evidence": [] }
+  ]
+}

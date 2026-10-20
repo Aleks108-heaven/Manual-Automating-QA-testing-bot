@@ -10,22 +10,22 @@
 //  - With a scripted model the numbers describe the machinery (assertions, verdicts, guardrails), not a model.
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { loadCase } from "../cases/load.ts";
-import type { Config } from "../config.ts";
-import type { JudgeClient } from "../judge/client.ts";
-import { ScriptedJudge } from "../judge/scripted.ts";
-import type { ModelClient } from "../model/client.ts";
-import { ScriptedModelClient } from "../model/scripted.ts";
-import type { PauseSource } from "../ops/kill-switch.ts";
-import { runCase } from "../runner/run-case.ts";
-import { StaticSecretStore, type SecretStore } from "../secrets/store.ts";
-import type { TestCase } from "../schemas/case.ts";
-import type { Verdict } from "../schemas/common.ts";
-import { launchSharedBrowser, type SharedBrowser } from "../tools/tool-layer.ts";
-import { COVERED_MUTANTS, generateMutants, MUTANT_CLASSES, sampleMutants, type Mutant } from "../../fixtures/mutants.ts";
-import { FIXTURE_SECRETS } from "../../fixtures/secrets.ts";
-import type { FixtureSite } from "../../fixtures/site/server.ts";
-import { percent, rate, type Rate } from "./stats.ts";
+import { loadCase } from "../src/cases/load.ts";
+import type { Config } from "../src/config.ts";
+import type { JudgeClient } from "../src/judge/client.ts";
+import { ScriptedJudge } from "../src/judge/scripted.ts";
+import type { ModelClient } from "../src/model/client.ts";
+import { ScriptedModelClient } from "../src/model/scripted.ts";
+import type { PauseSource } from "../src/ops/kill-switch.ts";
+import { runCase } from "../src/runner/run-case.ts";
+import { StaticSecretStore, type SecretStore } from "../src/secrets/store.ts";
+import type { TestCase } from "../src/schemas/case.ts";
+import type { Verdict } from "../src/schemas/common.ts";
+import { launchSharedBrowser, type SharedBrowser } from "../src/tools/tool-layer.ts";
+import { COVERED_MUTANTS, generateMutants, MUTANT_CLASSES, sampleMutants, type Mutant } from "../fixtures/mutants.ts";
+import { FIXTURE_SECRETS } from "../fixtures/secrets.ts";
+import type { FixtureSite } from "../fixtures/site/server.ts";
+import { percent, rate, type Rate } from "../src/eval/stats.ts";
 
 export type MutantStatus = "detected" | "missed" | "undecided" | "uncheckable" | "coverage-gap" | "equivalent";
 

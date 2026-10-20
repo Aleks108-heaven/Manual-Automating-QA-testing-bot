@@ -26,6 +26,16 @@ Run scripted cases on demand, on release candidates, and on a schedule, and use 
 - During the pilot each case runs three times, to measure repeatability.
 - Do not run performance tests on staging while bot runs share it.
 
+**Checking the bot itself.** Three suites measure the bot, not the application. They run against the local fixture site, never against a real target, and they stop when the kill switch is engaged. Each writes a JSON report and prints a text one. Every report names the model that was used. A report made with the scripted model tests the machinery (assertions, the verdict table, the guardrails) and says nothing about a language model, so it cannot be used for the pilot gates.
+
+| Suite | Command | Run it | What it tells you |
+| --- | --- | --- | --- |
+| Golden set | `node src/cli.ts golden` | After every change to the bot, the prompts, the model, the browser or the cases, and weekly | Whether any frozen verdict moved. A moved P1 verdict is flagged. See the [golden set runbook](../runbooks/golden-set.md) |
+| Mutant eval | `node src/cli.ts eval mutants [--sample N] [--repeat R]` | Before a release of the bot, and when cases change | Per defect class, how many seeded defects some case reports as FAIL, with a 95% bound; the misses by name; the defects no case covers |
+| Injection eval | `node src/cli.ts eval injection [--runs N]` | After a change to the tools, the prompts or the model | Whether hostile pages steer the bot, with a 95% upper bound on how often |
+
+The exit code is 0 when every gate held and 2 when something was flagged, so a schedule can act on it.
+
 **Exploratory mode.** The bot explores only against a charter, inside a time-box, in read-only mode unless the charter says otherwise. It reports suspected defects with evidence and reproduction steps, and a human sets severity and priority.
 
 | Charter field | What to write |

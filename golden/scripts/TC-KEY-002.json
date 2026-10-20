@@ -1,0 +1,36 @@
+{
+  "case_id": "TC-KEY-002",
+  "steps": [
+    [
+      {
+        "args": {
+          "url": "/apikey"
+        },
+        "tool": "goto"
+      }
+    ],
+    [
+      {
+        "args": {
+          "value": "not-the-key-0000",
+          "target": {
+            "selector": "#k"
+          }
+        },
+        "tool": "fill"
+      }
+    ],
+    [
+      {
+        "args": {
+          "target": {
+            "role": "button",
+            "name": "Save key"
+          }
+        },
+        "tool": "click"
+      }
+    ]
+  ],
+  "observations": []
+}

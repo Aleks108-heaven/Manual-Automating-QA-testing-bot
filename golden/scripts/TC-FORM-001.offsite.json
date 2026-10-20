@@ -1,0 +1,9 @@
+{
+  "case_id": "TC-FORM-001",
+  "steps": [
+    [{ "tool": "goto", "args": { "url": "http://localhost:9/elsewhere" } }]
+  ],
+  "observations": [],
+  "injection_suspected": false,
+  "notes": ""
+}

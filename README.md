@@ -2,7 +2,7 @@
 
 A bot that executes written test cases in a browser and reports a verdict with evidence. The design is in [docs/manual/](docs/manual/00-index.md), and the build plan is in [docs/build-brief.md](docs/build-brief.md).
 
-**Status: milestones M1 to M4 are built** (the thin slice; sessions, secrets, scrubbing and budgets; the judge, implicit checks and validated output; undeclared-change blocking, the pre-flight check and the kill switch). The bot runs cases against a local fixture site with a *scripted fake model and judge*. No API key, no cost, and no real application is involved. A live model and judge, the golden set, the final report, and frozen scripts come in later milestones.
+**Status: milestones M1 to M5 are built** (the thin slice; sessions, secrets, scrubbing and budgets; the judge, implicit checks and validated output; undeclared-change blocking, the pre-flight check and the kill switch; the golden set, the injection eval and the mutant eval). The bot runs cases against a local fixture site with a *scripted fake model and judge*. No API key, no cost, and no real application is involved. A live model and judge, the final report, and frozen scripts come in later milestones. **Every number the eval suites print today describes the bot's machinery, not a language model.**
 
 ## Run it
 
@@ -11,7 +11,7 @@ Needs Node 24.2 or newer.
 ```powershell
 npm install
 npx playwright install chromium      # one-time download of the pinned browser
-npm run check                        # type check, pin check, and all CI tests (about a minute)
+npm run check                        # type check, pin check, and all CI tests (about ten minutes)
 ```
 
 Run a case. The command starts the fixture site itself, runs the case in a real browser, and prints the verdict and where the evidence is:
@@ -27,7 +27,7 @@ Security checks: `npm run check:supply-chain` (known vulnerabilities and registr
 
 Exit codes: 0 for PASS, 1 for FAIL, 2 for BLOCKED, INCONCLUSIVE or INCOMPLETE, 3 when the run was refused (the kill switch is engaged, or a pre-flight check failed), 64 for a usage error. Every run writes `runs/<run id>/run.json` and the evidence files (screenshots, page snapshots, network logs) that the runner captured. `runs/` is not committed.
 
-Fixture defects you can turn on with `--defects`: `lockout-off-by-one`, `email-check-missing`, `wrong-email-message`.
+Fixture defects you can turn on with `--defects` (comma-separated, validated, so a typo fails instead of running on a correct app): the three old names `lockout-off-by-one`, `email-check-missing`, `wrong-email-message`, and parameterized ones such as `lockout-threshold=7`, `email-validator=accepts-no-at`, `email-status=500`, `apikey=accepts-any`, `logout-button=missing`, and `message=email-invalid:add-period`. The full list and values are in `fixtures/defects.ts`.
 
 If the negative control ever reports PASS, the bot is broken. Stop and fix it before trusting any other result.
 
@@ -51,6 +51,15 @@ Reviews: [docs/m1-review.md](docs/m1-review.md), [docs/m2-review.md](docs/m2-rev
 - **Scrubbing.** Everything the model is shown and everything stored is scrubbed of secrets, session tokens and credential headers. Screenshots cover password fields. The HAR is scrubbed, and there are no Playwright traces. A final scan of the stored files fails closed.
 - **Budgets and loop detection.** Tool calls, time and cost have limits, and a run that hits one is INCOMPLETE. The same action failing 3 times in a row (or repeated 8 times) is BLOCKED. Limits are in `config/default.json`.
 - **Run record v1** with the session, budget, redaction and scan sections. The CLI prints budget and scrub lines.
+
+## What M5 added
+
+- **Mutant eval (T19).** `node src/cli.ts eval mutants [--sample N] [--repeat R]` switches on one fixture defect at a time (243 generated mutants in 7 classes), runs the cases that are meant to notice it, and reports detection per class with exact 95% bounds, the misses by name, and the defects no case covers (coverage gaps, listed apart from misses). Equivalent mutants are left out of the denominator. A case that does not PASS on the clean application is not trusted.
+- **Golden set (T13).** `node src/cli.ts golden` runs 21 frozen verdicts and reports every one that moved; a moved P1 verdict is flagged. The set must be signed by a person before it counts (`golden/golden-set.json`, `frozen_by`), and `golden rehash` records the inputs after a reviewed change. See [docs/runbooks/golden-set.md](docs/runbooks/golden-set.md). Resuming the kill switch now also needs a clean golden report (`--golden-report`).
+- **Injection eval (T12).** `node src/cli.ts eval injection [--runs N]` runs hostile pages (visible and hidden text, alt text, labels, stored records, form values and server error messages) against the bot, each paired with a clean twin, and checks five conditions: ignored, contained, no leak, same verdict, flagged. It reports the upper 95% bound on how often the bot is steered.
+- **`exact: true`** for `text_visible`: the whole element text must equal the text. The first mutant runs showed that the substring check misses a changed message.
+- **One shared browser** per eval run, with a context per run, so several hundred runs take minutes. The allowlist and host rule are unchanged.
+- The suites are tested against **broken bots** (an idle bot, a bot that fails everything, cases that only check the URL, bots that obey the hostile pages), and must flag each. Review: [docs/m5-review.md](docs/m5-review.md).
 
 ## What M4 added
 
@@ -88,6 +97,9 @@ Check that nothing leaked, after any run: `Select-String -Path (Get-ChildItem ru
 | T5 | No PASS without runner-captured evidence | `tests/ci/oracle.test.ts` |
 | T6 | A wrong expected result fails | `tests/ci/oracle.test.ts` |
 | T10 | Dependencies are pinned to exact versions | `tests/ci/pins.test.ts` |
+| T12 | Hostile pages do not steer the bot; a steered bot is flagged by condition (harness half) | `tests/ci/injection-eval.test.ts` |
+| T13 | The golden set detects drift and names the moved P1 entry (harness half) | `tests/ci/golden.test.ts`, `tests/ci/kill-switch.test.ts` |
+| T19 | Mutant detection per class with exact bounds; a broken bot is flagged (harness half) | `tests/ci/mutant-eval.test.ts`, `tests/ci/stats.test.ts`, `tests/ci/defects.test.ts` |
 | T17 | The thin slice runs end to end, and the negative control fails | `tests/ci/thin-slice.test.ts`, `tests/ci/cli.test.ts` |
 | T22 | Cases are validated, and checks are timed with runner evidence | `tests/ci/case-validation.test.ts`, `tests/ci/oracle.test.ts` |
 
@@ -97,7 +109,9 @@ Check that nothing leaked, after any run: `Select-String -Path (Get-ChildItem ru
 cases/            YAML test cases
 config/           every value the manual marks [to fill]
 docs/             the manual (one file per page), the build brief, the design review log
-fixtures/site/    the local fixture site, with toggleable defects and trap pages
+evals/            the three eval suites (mutants, golden set, injection); they use the fixture, so they live outside src/
+fixtures/         the local fixture site (toggleable defects, trap pages, hostile pages), the defect registry, the mutant manifest
+golden/           the frozen verdicts and their scripts
 prompts/          the actor and judge prompts (the source of truth)
 scripts/          the pin checker
 src/              schemas, cases, tools, model, agent, oracle, verdict, runner, cli

@@ -7,6 +7,7 @@ import { loadCase } from "../../src/cases/load.ts";
 import type { Config } from "../../src/config.ts";
 import { KillSwitch, KillSwitchError, RunnerPausedError } from "../../src/ops/kill-switch.ts";
 import type { FinalContext, ModelAction, ModelClient, ModelContext } from "../../src/model/client.ts";
+import type { GoldenReport } from "../../src/eval/golden-report.ts";
 import type { PreflightReport } from "../../src/preflight/report.ts";
 import { StaticSecretStore } from "../../src/secrets/store.ts";
 import { establishSession } from "../../src/sessions/session-setup.ts";
@@ -51,6 +52,34 @@ function saveReport(config: Config, report: unknown): string {
   return path;
 }
 const later = (ms = 2000) => new Date(Date.now() + ms);
+
+function goodGolden(at: Date, overrides: Partial<GoldenReport> = {}): GoldenReport {
+  return {
+    schema_version: 1,
+    kind: "golden-set",
+    at: at.toISOString(),
+    purpose: "resume",
+    model: "scripted",
+    notes: [],
+    golden_file: "golden/golden-set.json",
+    frozen_at: "2026-10-20",
+    frozen_by: "reviewer",
+    build: "fixture-1",
+    entries: [],
+    match: { count: 21, n: 21, rate: 1, lower95: 0.9, upper95: 1 },
+    changed_p1: [],
+    flags: [],
+    ok: true,
+    seconds: 1,
+    ...overrides,
+  };
+}
+
+/** Both reports a resume needs, each made after the engagement. */
+const ready = (config: Config, goldenOverrides: Partial<GoldenReport> = {}) => ({
+  preflightReport: saveReport(config, goodReport(later())),
+  goldenReport: saveReport(config, goodGolden(later(), goldenOverrides)),
+});
 
 describe("T11 engaging the kill switch", () => {
   it("is not engaged to begin with", () => {
@@ -128,11 +157,11 @@ describe("T11 engaging the kill switch", () => {
     writeFileSync(config.killSwitch.stateFile, "{ this is not json");
     const ks = new KillSwitch({ config, targetOrigin: site.origin });
     expect(ks.status()).toMatchObject({ paused: true, corrupt: true });
-    await expect(ks.resume({ by: "sam", review: "R", fix: "F", preflightReport: saveReport(config, goodReport(later())) })).rejects.toThrow(/unreadable/);
+    await expect(ks.resume({ by: "sam", review: "R", fix: "F", ...ready(config) })).rejects.toThrow(/unreadable/);
     const repaired = await ks.engage({ by: "alex", reason: "the state file was damaged" });
     expect(repaired.corrupt).toBeUndefined();
     expect(repaired.engaged_by).toBe("alex");
-    await ks.resume({ by: "sam", review: "R", fix: "F", preflightReport: saveReport(config, goodReport(later())) });
+    await ks.resume({ by: "sam", review: "R", fix: "F", ...ready(config) });
     expect(ks.isPaused()).toBe(false);
   });
 
@@ -214,7 +243,7 @@ describe("T11 resuming follows the documented steps", () => {
   it("is refused when the switch is not engaged", async () => {
     const config = testConfig();
     const ks = new KillSwitch({ config, targetOrigin: site.origin });
-    await expect(ks.resume({ ...good, preflightReport: saveReport(config, goodReport(later())) })).rejects.toThrow(/not engaged/);
+    await expect(ks.resume({ ...good, ...ready(config) })).rejects.toThrow(/not engaged/);
   });
 
   it.each([
@@ -223,7 +252,7 @@ describe("T11 resuming follows the documented steps", () => {
     ["no verified fix", { fix: " " }, /verified fix/],
   ])("is refused with %s", async (_name, change, pattern) => {
     const { config, ks } = await engaged();
-    await expect(ks.resume({ ...good, ...change, preflightReport: saveReport(config, goodReport(later())) })).rejects.toThrow(pattern);
+    await expect(ks.resume({ ...good, ...change, ...ready(config) })).rejects.toThrow(pattern);
     expect(ks.isPaused()).toBe(true);
   });
 
@@ -264,14 +293,14 @@ describe("T11 resuming follows the documented steps", () => {
     });
     const ks = new KillSwitch({ config, targetOrigin: site.origin });
     await ks.engage({ by: "alex", reason: "x" });
-    await expect(ks.resume({ ...good, preflightReport: saveReport(config, goodReport(later())) })).rejects.toThrow(/restoring access failed/);
+    await expect(ks.resume({ ...good, ...ready(config) })).rejects.toThrow(/restoring access failed/);
     expect(ks.isPaused()).toBe(true);
   });
 
   it("with a named reviewer, a fix, and a clean report it restores access and allows a run again", async () => {
     const { config, ks } = await engaged();
     expect((await login()).status).toBe(403);
-    const state = await ks.resume({ ...good, preflightReport: saveReport(config, goodReport(later())) });
+    const state = await ks.resume({ ...good, ...ready(config) });
     expect(state).toMatchObject({ paused: false, resumed_by: "sam" });
     expect(ks.isPaused()).toBe(false);
     expect((await login()).status).toBe(200); // the account works again
@@ -281,14 +310,66 @@ describe("T11 resuming follows the documented steps", () => {
 
   it("every action is in the audit log, in order, with who and why, including the refusals", async () => {
     const { config, ks } = await engaged();
-    await expect(ks.resume({ by: "sam", review: "", fix: "PR-34", preflightReport: saveReport(config, goodReport(later())) })).rejects.toThrow();
-    await ks.resume({ ...good, preflightReport: saveReport(config, goodReport(later())) });
+    await expect(ks.resume({ by: "sam", review: "", fix: "PR-34", ...ready(config) })).rejects.toThrow();
+    await ks.resume({ ...good, ...ready(config) });
     const log = auditActions(config);
     expect(log.map((a) => a["action"])).toEqual(["engage", "revoke", "resume-refused", "restore", "resume"]);
     expect(log[0]).toMatchObject({ by: "alex", reason: "an incident" });
     expect(log[2]).toMatchObject({ by: "sam", why: expect.stringContaining("completed review") });
     expect(log[4]).toMatchObject({ by: "sam", review: "REVIEW-12", fix: "PR-34" });
     expect(log[4]?.["preflight_report_sha256"]).toMatch(/^[0-9a-f]{64}$/); // which exact report was accepted
+    expect(log[4]?.["golden_report_sha256"]).toMatch(/^[0-9a-f]{64}$/);
     for (const entry of log) expect(typeof entry["at"]).toBe("string");
+  });
+});
+
+describe("T11 resuming also needs a clean golden-set run", () => {
+  const good = { by: "sam", review: "REVIEW-12", fix: "PR-34" };
+  async function engaged(change: (c: Config) => void = () => undefined) {
+    const config = testConfig(change);
+    const ks = new KillSwitch({ config, targetOrigin: site.origin });
+    await ks.engage({ by: "alex", reason: "an incident" });
+    return { config, ks };
+  }
+
+  it("is on by default", () => {
+    expect(testConfig().killSwitch.requireGoldenRun).toBe(true);
+  });
+
+  it("is refused without a golden-set report, or with one that is not a report", async () => {
+    const { config, ks } = await engaged();
+    const preflightReport = saveReport(config, goodReport(later()));
+    await expect(ks.resume({ ...good, preflightReport })).rejects.toThrow(/golden-set report is required/);
+    await expect(ks.resume({ ...good, preflightReport, goldenReport: join(config.runs.directory, "nope.json") })).rejects.toThrow(/does not exist/);
+    await expect(ks.resume({ ...good, preflightReport, goldenReport: saveReport(config, "not json") })).rejects.toThrow(/golden-set report is not a valid report/);
+    await expect(ks.resume({ ...good, preflightReport, goldenReport: saveReport(config, goodReport(later())) })).rejects.toThrow(/not a valid report/); // a pre-flight report is not a golden report
+    expect(ks.isPaused()).toBe(true);
+  });
+
+  it("is refused when a verdict moved, an input changed, or nobody froze the set", async () => {
+    const { config, ks } = await engaged();
+    const preflightReport = saveReport(config, goodReport(later()));
+    const moved = goodGolden(later(), { ok: false, changed_p1: ["G01"], flags: ["P1 verdict(s) changed: G01"] });
+    const unfrozen = goodGolden(later(), { ok: false, frozen_by: "[to fill: the person who reviews and signs this set]", flags: ["nobody has frozen this set yet"] });
+    const lying = goodGolden(later(), { ok: true, changed_p1: ["G06"] });
+    for (const report of [moved, unfrozen, lying]) await expect(ks.resume({ ...good, preflightReport, goldenReport: saveReport(config, report) })).rejects.toThrow(/golden-set report is not clean/);
+    expect(ks.isPaused()).toBe(true);
+  });
+
+  it("is refused when the golden run was not made for resuming, or is older than the engagement", async () => {
+    const { config, ks } = await engaged();
+    const preflightReport = saveReport(config, goodReport(later()));
+    await expect(ks.resume({ ...good, preflightReport, goldenReport: saveReport(config, goodGolden(later(), { purpose: "run" })) })).rejects.toThrow(/not made for resuming/);
+    await expect(ks.resume({ ...good, preflightReport, goldenReport: saveReport(config, goodGolden(new Date(Date.now() - 60_000))) })).rejects.toThrow(/older than the engagement/);
+    expect(ks.isPaused()).toBe(true);
+  });
+
+  it("records the exact golden report in the audit log, and can be switched off in the configuration", async () => {
+    const off = await engaged((c) => {
+      c.killSwitch.requireGoldenRun = false;
+    });
+    await off.ks.resume({ ...good, preflightReport: saveReport(off.config, goodReport(later())) });
+    expect(off.ks.isPaused()).toBe(false);
+    expect(auditActions(off.config).at(-1)?.["golden_report_sha256"]).toBeUndefined();
   });
 });

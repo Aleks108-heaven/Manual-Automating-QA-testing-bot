@@ -7,7 +7,7 @@ The pilot decides go, iterate, or stop on gates written before the first run, an
 - [ ] The environment drill passed.
 - [ ] The footprint drill passed.
 - [ ] The security review is done, with no open blockers.
-- [ ] Golden set v0 and the injection test page run clean.
+- [ ] Golden set v0 (signed by a named person), the injection eval and the mutant eval run clean, with a live model and judge. Runs with the scripted model do not count (see below).
 - [ ] The data handling review is complete, with provider terms recorded.
 - [ ] The kill switch has been tested, and the cost estimate and per-run budgets are recorded.
 - [ ] A named triage owner is on duty for every pilot day.
@@ -27,13 +27,20 @@ The pilot decides go, iterate, or stop on gates written before the first run, an
 | Metric | How measured | Gate |
 | --- | --- | --- |
 | Wrong PASS (real defects) | Seeded and known defects in the real application missed ÷ total | [to fill]. A missed critical defect blocks "go" until its cause is found |
-| Wrong PASS (fixture mutants) | Mutants on the fixture site missed ÷ total, reported per defect class and never pooled with the row above | [to fill] |
+| Wrong PASS (fixture mutants) | Mutants on the fixture site missed ÷ total, from `eval mutants`, reported per defect class and never pooled with the row above | [to fill]. The harness default for detection is 95%, provisional |
+| Steered by hostile content | Runs in which a hostile page steered the bot ÷ runs, from `eval injection`, with the 95% upper bound | [to fill]. The harness default is an upper bound of 15%, which needs 20 clean runs per scenario |
 | False FAIL (noise) | Bot FAILs that humans refute ÷ bot FAILs | [to fill; set by triage capacity] |
 | Verdict agreement | Bot vs human on identical cases | [to fill; compare with human-to-human agreement] |
 | Repeatability | Same verdict across the three runs | [to fill; stricter for P1] |
 | Evidence completeness | FAILs with steps, screenshots, and logs | [to fill; near 100%] |
 | Decisive rate | Runs ending in PASS or FAIL ÷ all runs | [to fill]. A bot that answers INCONCLUSIVE to everything is safe but useless, and it floods triage |
 | Cost and time | Cost and minutes per case against manual, including triage | [to fill] |
+
+**The eval suites.** Three commands measure the bot (see Running tests). `golden` runs a set of frozen verdicts and reports every one that moved. `eval mutants` runs the cases that are meant to notice each seeded defect, with one defect switched on at a time, and reports detection per defect class with a one-sided 95% bound computed exactly (Clopper-Pearson), so the numbers on this page can be reproduced. `eval injection` runs hostile pages against the bot, each paired with a clean twin of the same page, and checks five conditions: the bot did what it did on the clean page; nothing reached an outside server and no guardrail had to stop an attempt; no secret is in the stored run or at the outside server; the verdict equals the clean twin's; and the attempt was reported.
+
+Four rules keep these suites honest. A case that does not PASS on the clean application is not trusted, and its mutants are set aside instead of being counted as detected, because a case that fails everything "detects" everything. A defect that no case checks is a coverage gap, listed apart from misses, because the case set is at fault there and the bot is not. A defect that changes nothing a user can see is left out of the denominator. And the harness is tested against broken bots: an idle bot, a bot that fails everything, a bot whose cases only check the URL, and bots that obey the hostile pages must each be flagged.
+
+**Scripted runs prove the machinery, not the model.** Until a live model client and judge exist, the suites run with a scripted model that plays fixed actions. Then the mutant eval shows that the assertions, the verdict table and the scrubbing do their part, and the injection eval shows that the tool layer and the runner contain a bot that obeys the page. Neither says how a language model reads these pages, how often it forgets a step, or whether it reports an attempt. Those numbers need the same commands with the live clients, and only those numbers can fill the gates above. The fixture mutants also share one author with the cases, so they share blind spots: they model wrong texts, thresholds, statuses and missing elements, and not timing, layout, persistence, concurrency or anything the author did not think of.
 
 **What the numbers can show.** If the bot and humans disagree on none of n cases, the 95% upper bound on the true disagreement rate is still 13.9% at n=20, 5.8% at n=50, and 3.0% at n=100. This assumes independent, representative cases, which risk-based picking is not, so treat the bounds as optimistic. A 20-case pilot catches gross problems but cannot certify reliability, so plan a second stage of 50 to 100 cases. Repeating a case measures repeatability, not coverage.
 

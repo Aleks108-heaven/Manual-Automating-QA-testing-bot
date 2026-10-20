@@ -8,6 +8,7 @@ import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type { Config } from "../config.ts";
+import { GoldenReportSchema } from "../eval/golden-report.ts";
 import { PreflightReportSchema } from "../preflight/report.ts";
 import type { Call } from "../schemas/case.ts";
 
@@ -157,10 +158,10 @@ export class KillSwitch implements PauseSource {
 
   /**
    * Resumes the runner. Needs the three things the manual names: a completed review, a verified fix, and a clean run.
-   * Until the golden set exists (M5) the clean run is a pre-flight report in which every check passed, written after
-   * the switch was engaged.
+   * The clean run is a pre-flight report in which every check passed and a clean golden-set report, both written after
+   * the switch was engaged (the golden report can be switched off with killSwitch.requireGoldenRun).
    */
-  async resume(args: { by: string; review: string; fix: string; preflightReport: string }): Promise<KillSwitchState> {
+  async resume(args: { by: string; review: string; fix: string; preflightReport: string; goldenReport?: string }): Promise<KillSwitchState> {
     const refuse = (why: string): never => {
       this.audit({ action: "resume-refused", by: args.by, review: args.review, fix: args.fix, why });
       throw new KillSwitchError(`Cannot resume: ${why}`);
@@ -183,6 +184,23 @@ export class KillSwitch implements PauseSource {
     if (!report.ok || report.checks.some((c) => c.status !== "passed")) return refuse("the pre-flight report is not clean: every check must have passed, and none may be skipped");
     if (state.engaged_at && Date.parse(report.at) <= Date.parse(state.engaged_at)) return refuse("the pre-flight report is older than the engagement, so it does not show that the problem is fixed");
 
+    // The golden set shows that the fix did not move any frozen verdict. It is the "clean run" the manual asks for.
+    let goldenHash: string | null = null;
+    if (this.config.killSwitch.requireGoldenRun) {
+      const path = (args.goldenReport ?? "").trim();
+      if (!path || !existsSync(path)) return refuse("a clean golden-set report is required (--golden-report <file>), and that file does not exist");
+      let golden;
+      try {
+        golden = GoldenReportSchema.parse(JSON.parse(readFileSync(path, "utf8")));
+      } catch {
+        return refuse("the golden-set report is not a valid report");
+      }
+      if (golden.purpose !== "resume") return refuse("the golden-set report was not made for resuming (run the golden command with --for-resume)");
+      if (!golden.ok || golden.changed_p1.length > 0) return refuse("the golden-set report is not clean: a verdict moved, an input changed, or nobody has frozen the set");
+      if (state.engaged_at && Date.parse(golden.at) <= Date.parse(state.engaged_at)) return refuse("the golden-set report is older than the engagement, so it does not show that the problem is fixed");
+      goldenHash = createHash("sha256").update(readFileSync(path)).digest("hex");
+    }
+
     // Restore the credentials before the runner is allowed to run. If this fails, the runner stays paused.
     const restored = [];
     for (const call of this.config.killSwitch.restoreCalls) {
@@ -197,7 +215,7 @@ export class KillSwitch implements PauseSource {
     // The hash ties the audit entry to the exact report that was accepted. The report is not signed, so a hand-written
     // one would be accepted. The hash at least shows afterwards which file it was.
     const reportHash = createHash("sha256").update(readFileSync(args.preflightReport)).digest("hex");
-    this.audit({ action: "resume", by: args.by.trim(), review: args.review.trim(), fix: args.fix.trim(), preflight_report: args.preflightReport, preflight_report_sha256: reportHash });
+    this.audit({ action: "resume", by: args.by.trim(), review: args.review.trim(), fix: args.fix.trim(), preflight_report: args.preflightReport, preflight_report_sha256: reportHash, ...(goldenHash ? { golden_report: args.goldenReport, golden_report_sha256: goldenHash } : {}) });
     return next;
   }
 }

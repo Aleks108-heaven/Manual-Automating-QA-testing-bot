@@ -1,0 +1,490 @@
+{
+  "schema_version": 1,
+  "frozen_by": "[to fill: the person who reviews and signs this set]",
+  "frozen_at": "2026-10-20",
+  "build": "fixture-1",
+  "note": "Drafted by the build agent from the cases and scripts of M1 to M5. The verdict and precedence row of each entry were written before the run. A person must review every entry and replace frozen_by before this set means anything.",
+  "entries": [
+    {
+      "id": "G01",
+      "title": "Invalid email is rejected (clean app)",
+      "case": "cases/TC-FORM-001.yaml",
+      "script": "golden/scripts/TC-FORM-001.json",
+      "defects": [],
+      "limits": {},
+      "priority": "P1",
+      "expect": {
+        "verdict": "PASS",
+        "row": 7,
+        "outcomes": {
+          "e2": "MATCH",
+          "e3": "MATCH",
+          "e1": "MATCH"
+        }
+      },
+      "rationale": "The application behaves as the case says, so a correct bot reports PASS.",
+      "inputs": {
+        "case_sha256": "e7fa9bcddd44118c699f67701b74f49f4ba916d801b2d9fd6087c0363e275396",
+        "script_sha256": "8a16d80641e50c92909d22b0fc714210d1f00faeb2a3c1a993fe3bb092b8dd5d"
+      }
+    },
+    {
+      "id": "G02",
+      "title": "Valid email forms are accepted (clean app)",
+      "case": "cases/TC-FORM-002.yaml",
+      "script": "golden/scripts/TC-FORM-002.json",
+      "defects": [],
+      "limits": {},
+      "priority": "P1",
+      "expect": {
+        "verdict": "PASS",
+        "row": 7,
+        "outcomes": {
+          "e2": "MATCH",
+          "e3": "MATCH",
+          "e1": "MATCH"
+        }
+      },
+      "rationale": "Plus sign, subdomain and capital letters are valid addresses and the clean fixture accepts them.",
+      "inputs": {
+        "case_sha256": "a7b0cff7e226643362882af78962cfcddf3f93f2638b0bd198901927eea3b652",
+        "script_sha256": "a962ef1fd59f9033ca681c83e19e85e0a1b55f9190d89d912e3f4de0b7d8e8a1"
+      }
+    },
+    {
+      "id": "G03",
+      "title": "Address without a domain is rejected (clean app)",
+      "case": "cases/TC-FORM-003.yaml",
+      "script": "golden/scripts/TC-FORM-003.json",
+      "defects": [],
+      "limits": {},
+      "priority": "P2",
+      "expect": {
+        "verdict": "PASS",
+        "row": 7,
+        "outcomes": {
+          "e1": "MATCH",
+          "e2": "MATCH"
+        }
+      },
+      "rationale": "The clean fixture rejects an address without a domain part.",
+      "inputs": {
+        "case_sha256": "132df24e99c69ce2bf4049c0c41d413c32b944199939d11aaa83a59e9f36d7ae",
+        "script_sha256": "630de6349867f9ff1271a5dd453d2fbdb0c12fbde9aac4fdef82dd2d96f5fcf6"
+      }
+    },
+    {
+      "id": "G04",
+      "title": "Address with a space is rejected (clean app)",
+      "case": "cases/TC-FORM-004.yaml",
+      "script": "golden/scripts/TC-FORM-004.json",
+      "defects": [],
+      "limits": {},
+      "priority": "P2",
+      "expect": {
+        "verdict": "PASS",
+        "row": 7,
+        "outcomes": {
+          "e1": "MATCH",
+          "e2": "MATCH"
+        }
+      },
+      "rationale": "The clean fixture rejects an address with a space.",
+      "inputs": {
+        "case_sha256": "e35cda361c78ebe024ca9c7ad85a10ad42615f8826e3b241d4ff4e0e6ac180d7",
+        "script_sha256": "a9a835a8aa8243c9f6d9c47f096a5b5020cbf28fccb0e406555b3b1bad0ce215"
+      }
+    },
+    {
+      "id": "G05",
+      "title": "Empty email is rejected (clean app)",
+      "case": "cases/TC-FORM-005.yaml",
+      "script": "golden/scripts/TC-FORM-005.json",
+      "defects": [],
+      "limits": {},
+      "priority": "P2",
+      "expect": {
+        "verdict": "PASS",
+        "row": 7,
+        "outcomes": {
+          "e1": "MATCH",
+          "e2": "MATCH"
+        }
+      },
+      "rationale": "The clean fixture rejects an empty address.",
+      "inputs": {
+        "case_sha256": "cda6cef97ed66b81930a904bad5d35a98f204d1c62a0ef4a94fcd23de636ed77",
+        "script_sha256": "55b4f558c90bac42515d2098be98f3c2916f28050ab3ddd1d03134c0d6cc57b4"
+      }
+    },
+    {
+      "id": "G06",
+      "title": "Wrong password is refused (clean app)",
+      "case": "cases/TC-AUTH-003.yaml",
+      "script": "golden/scripts/TC-AUTH-003.json",
+      "defects": [],
+      "limits": {},
+      "priority": "P1",
+      "expect": {
+        "verdict": "PASS",
+        "row": 7,
+        "outcomes": {
+          "e2": "MATCH",
+          "e3": "MATCH",
+          "e1": "MATCH"
+        }
+      },
+      "rationale": "Four failed logins do not lock the account when the threshold is five.",
+      "inputs": {
+        "case_sha256": "5d9cceefbd57e443146c0bc9f70e82f5449d9fb6ed1de56204920cb4fc9ec085",
+        "script_sha256": "4a7fa53e3337832393651cb4b9acd2e73be8b4ab25053780c39483999637938a"
+      }
+    },
+    {
+      "id": "G07",
+      "title": "Fifth failed login locks the account (clean app)",
+      "case": "cases/TC-AUTH-004.yaml",
+      "script": "golden/scripts/TC-AUTH-004.json",
+      "defects": [],
+      "limits": {},
+      "priority": "P1",
+      "expect": {
+        "verdict": "PASS",
+        "row": 7,
+        "outcomes": {
+          "e4": "MATCH",
+          "e2": "MATCH",
+          "e1": "MATCH",
+          "e3": "MATCH",
+          "e6": "MATCH",
+          "e5": "MATCH"
+        }
+      },
+      "rationale": "The clean fixture locks on the fifth failed attempt, as the case says.",
+      "inputs": {
+        "case_sha256": "445d241c20dc8f6aa86dac64b1e6ec5739b14bd5cce005522cc28a3088d5bdb9",
+        "script_sha256": "f1cc087380d51ac83af6e148953268fe2762606d1591f4a751fca6efbed65b33"
+      }
+    },
+    {
+      "id": "G08",
+      "title": "Signed-in member sees the account page (clean app)",
+      "case": "cases/TC-ACCT-001.yaml",
+      "script": "golden/scripts/TC-ACCT-001.json",
+      "defects": [],
+      "limits": {},
+      "priority": "P1",
+      "expect": {
+        "verdict": "PASS",
+        "row": 7,
+        "outcomes": {
+          "e2": "MATCH",
+          "e3": "MATCH",
+          "e1": "MATCH"
+        }
+      },
+      "rationale": "The runner signs the member in. The model never sees a login.",
+      "inputs": {
+        "case_sha256": "797ed5004c1974a62855135e4abb2b704d52c7a733777458df008475175b1773",
+        "script_sha256": "69cd340af45dae1798a61fef2a5a27ae67907e1984eb7342d3dc173f99ee0711"
+      }
+    },
+    {
+      "id": "G09",
+      "title": "Accepted API key (clean app, secret)",
+      "case": "cases/TC-KEY-001.yaml",
+      "script": "golden/scripts/TC-KEY-001.json",
+      "defects": [],
+      "limits": {},
+      "priority": "P1",
+      "expect": {
+        "verdict": "PASS",
+        "row": 7,
+        "outcomes": {
+          "e1": "MATCH",
+          "e2": "MATCH"
+        }
+      },
+      "rationale": "The case types a secret through fill_secret and the clean fixture accepts it.",
+      "inputs": {
+        "case_sha256": "5e9988894179a9ee8eabc22cdd7a6b6ffc4cb22a0d6cec7c25f18d7b9f841cc7",
+        "script_sha256": "a320b955c017733d5dfd7c63703da1236534befae506a13a8be885a4e60adfee"
+      }
+    },
+    {
+      "id": "G10",
+      "title": "Rejected API key (clean app)",
+      "case": "cases/TC-KEY-002.yaml",
+      "script": "golden/scripts/TC-KEY-002.json",
+      "defects": [],
+      "limits": {},
+      "priority": "P2",
+      "expect": {
+        "verdict": "PASS",
+        "row": 7,
+        "outcomes": {
+          "e1": "MATCH",
+          "e2": "MATCH"
+        }
+      },
+      "rationale": "A wrong key is refused by the clean fixture.",
+      "inputs": {
+        "case_sha256": "5a72f86f5020c18350146d51b82c9e51e70bf0dd17c7cadf3fe078ace31734a9",
+        "script_sha256": "59bbd3bd9ca7cc1c7490719a296f056a9f51e93b48b7d368debc6b20f7c23ec1"
+      }
+    },
+    {
+      "id": "G11",
+      "title": "Judged result decided by the judge",
+      "case": "cases/TC-JUDGE-001.yaml",
+      "script": "golden/scripts/TC-JUDGE-001.json",
+      "judge_script": "golden/scripts/TC-JUDGE-001.judge.json",
+      "defects": [],
+      "limits": {},
+      "priority": "P2",
+      "expect": {
+        "verdict": "PASS",
+        "row": 7,
+        "outcomes": {
+          "j1": "MATCH",
+          "s1": "MATCH"
+        }
+      },
+      "rationale": "One structured result and one judged result, the judge says MATCH on runner evidence.",
+      "inputs": {
+        "case_sha256": "72200d42334ac4fd40b68b40f359a4c55d78d521e4986594361251e7091683fc",
+        "script_sha256": "664f59d5ab025fb81f270c66115f874d8964e7ad68121a148756ca75257af644",
+        "judge_script_sha256": "0bb244b39267d73295ba43ab04f52b576428875fb95590b71222a6697da47874"
+      }
+    },
+    {
+      "id": "G12",
+      "title": "Email check accepts everything",
+      "case": "cases/TC-FORM-001.yaml",
+      "script": "golden/scripts/TC-FORM-001.json",
+      "defects": [
+        "email-validator=accepts-all"
+      ],
+      "limits": {},
+      "priority": "P1",
+      "expect": {
+        "verdict": "FAIL",
+        "row": 3,
+        "outcomes": {
+          "e1": "MISMATCH",
+          "e3": "MISMATCH",
+          "e2": "MATCH"
+        }
+      },
+      "rationale": "A seeded defect on the exact thing the case checks: the bot must report FAIL.",
+      "inputs": {
+        "case_sha256": "e7fa9bcddd44118c699f67701b74f49f4ba916d801b2d9fd6087c0363e275396",
+        "script_sha256": "8a16d80641e50c92909d22b0fc714210d1f00faeb2a3c1a993fe3bb092b8dd5d"
+      }
+    },
+    {
+      "id": "G13",
+      "title": "Error message has a full stop added",
+      "case": "cases/TC-FORM-001.yaml",
+      "script": "golden/scripts/TC-FORM-001.json",
+      "defects": [
+        "message=email-invalid:add-period"
+      ],
+      "limits": {},
+      "priority": "P1",
+      "expect": {
+        "verdict": "FAIL",
+        "row": 3,
+        "outcomes": {
+          "e1": "MISMATCH",
+          "e3": "MATCH",
+          "e2": "MATCH"
+        }
+      },
+      "rationale": "The case demands the exact message. A substring check would miss this.",
+      "inputs": {
+        "case_sha256": "e7fa9bcddd44118c699f67701b74f49f4ba916d801b2d9fd6087c0363e275396",
+        "script_sha256": "8a16d80641e50c92909d22b0fc714210d1f00faeb2a3c1a993fe3bb092b8dd5d"
+      }
+    },
+    {
+      "id": "G14",
+      "title": "Account locks one attempt too early",
+      "case": "cases/TC-AUTH-003.yaml",
+      "script": "golden/scripts/TC-AUTH-003.json",
+      "defects": [
+        "lockout-threshold=4"
+      ],
+      "limits": {},
+      "priority": "P1",
+      "expect": {
+        "verdict": "FAIL",
+        "row": 3,
+        "outcomes": {
+          "e1": "MISMATCH",
+          "e3": "MISMATCH",
+          "e2": "MISMATCH"
+        }
+      },
+      "rationale": "The fourth failed login locks the account, so the case that checks the account is not locked yet must fail.",
+      "inputs": {
+        "case_sha256": "5d9cceefbd57e443146c0bc9f70e82f5449d9fb6ed1de56204920cb4fc9ec085",
+        "script_sha256": "4a7fa53e3337832393651cb4b9acd2e73be8b4ab25053780c39483999637938a"
+      }
+    },
+    {
+      "id": "G15",
+      "title": "API check accepts any key",
+      "case": "cases/TC-KEY-002.yaml",
+      "script": "golden/scripts/TC-KEY-002.json",
+      "defects": [
+        "apikey=accepts-any"
+      ],
+      "limits": {},
+      "priority": "P1",
+      "expect": {
+        "verdict": "FAIL",
+        "row": 3,
+        "outcomes": {
+          "e1": "MISMATCH",
+          "e2": "MISMATCH"
+        }
+      },
+      "rationale": "A wrong key is accepted: a security defect the case exists to catch.",
+      "inputs": {
+        "case_sha256": "5a72f86f5020c18350146d51b82c9e51e70bf0dd17c7cadf3fe078ace31734a9",
+        "script_sha256": "59bbd3bd9ca7cc1c7490719a296f056a9f51e93b48b7d368debc6b20f7c23ec1"
+      }
+    },
+    {
+      "id": "G16",
+      "title": "Log out button is missing",
+      "case": "cases/TC-ACCT-001.yaml",
+      "script": "golden/scripts/TC-ACCT-001.json",
+      "defects": [
+        "logout-button=missing"
+      ],
+      "limits": {},
+      "priority": "P2",
+      "expect": {
+        "verdict": "FAIL",
+        "row": 3,
+        "outcomes": {
+          "e1": "MATCH",
+          "e3": "MATCH",
+          "e2": "MISMATCH"
+        }
+      },
+      "rationale": "The account page lacks the Log out button the case expects.",
+      "inputs": {
+        "case_sha256": "797ed5004c1974a62855135e4abb2b704d52c7a733777458df008475175b1773",
+        "script_sha256": "69cd340af45dae1798a61fef2a5a27ae67907e1984eb7342d3dc173f99ee0711"
+      }
+    },
+    {
+      "id": "G17",
+      "title": "Negative control: one expected result made wrong",
+      "case": "cases/TC-FORM-001.yaml",
+      "script": "golden/scripts/TC-FORM-001.json",
+      "defects": [],
+      "negative_control": "e1",
+      "limits": {},
+      "priority": "P1",
+      "expect": {
+        "verdict": "FAIL",
+        "row": 3,
+        "outcomes": {
+          "e1": "MISMATCH",
+          "e3": "MATCH",
+          "e2": "MATCH"
+        }
+      },
+      "rationale": "A case with a deliberately wrong expected result must FAIL on a correct application. This is how the bot proves it can fail.",
+      "inputs": {
+        "case_sha256": "e7fa9bcddd44118c699f67701b74f49f4ba916d801b2d9fd6087c0363e275396",
+        "script_sha256": "8a16d80641e50c92909d22b0fc714210d1f00faeb2a3c1a993fe3bb092b8dd5d"
+      }
+    },
+    {
+      "id": "G18",
+      "title": "Actor cannot find the Email field",
+      "case": "cases/TC-FORM-001.yaml",
+      "script": "golden/scripts/TC-FORM-001.blocked.json",
+      "defects": [],
+      "limits": {},
+      "priority": "P2",
+      "expect": {
+        "verdict": "BLOCKED",
+        "row": 4,
+        "outcomes": {}
+      },
+      "rationale": "The actor stopped with element_missing, so the run is BLOCKED and nothing is claimed about the application.",
+      "inputs": {
+        "case_sha256": "e7fa9bcddd44118c699f67701b74f49f4ba916d801b2d9fd6087c0363e275396",
+        "script_sha256": "cf6e3419b422f9000d9315c668733f1ae34aa09131317601cb7a0b55cb047a66"
+      }
+    },
+    {
+      "id": "G19",
+      "title": "Actor is steered off the allowed domains",
+      "case": "cases/TC-FORM-001.yaml",
+      "script": "golden/scripts/TC-FORM-001.offsite.json",
+      "defects": [],
+      "limits": {},
+      "priority": "P1",
+      "expect": {
+        "verdict": "INCONCLUSIVE",
+        "row": 2,
+        "outcomes": {}
+      },
+      "rationale": "The tool layer blocked a navigation outside the allowlist. A guardrail block makes the run INCONCLUSIVE.",
+      "inputs": {
+        "case_sha256": "e7fa9bcddd44118c699f67701b74f49f4ba916d801b2d9fd6087c0363e275396",
+        "script_sha256": "0001d6c50905ddceecff770c2a9ed0efc3d029e6a049b40b184a1b53e6f2841c"
+      }
+    },
+    {
+      "id": "G20",
+      "title": "Judged result without a judge",
+      "case": "cases/TC-JUDGE-001.yaml",
+      "script": "golden/scripts/TC-JUDGE-001.json",
+      "defects": [],
+      "limits": {},
+      "priority": "P2",
+      "expect": {
+        "verdict": "INCONCLUSIVE",
+        "row": 6,
+        "outcomes": {
+          "j1": "NO_EVIDENCE",
+          "s1": "MATCH"
+        }
+      },
+      "rationale": "Without a judge the judged result has no outcome, and a result without evidence can never PASS.",
+      "inputs": {
+        "case_sha256": "72200d42334ac4fd40b68b40f359a4c55d78d521e4986594361251e7091683fc",
+        "script_sha256": "664f59d5ab025fb81f270c66115f874d8964e7ad68121a148756ca75257af644"
+      }
+    },
+    {
+      "id": "G21",
+      "title": "Tool call budget runs out",
+      "case": "cases/TC-FORM-001.yaml",
+      "script": "golden/scripts/TC-FORM-001.json",
+      "defects": [],
+      "limits": {
+        "max_tool_calls_per_run": 2
+      },
+      "priority": "P2",
+      "expect": {
+        "verdict": "INCOMPLETE",
+        "row": 5,
+        "outcomes": {}
+      },
+      "rationale": "Two tool calls are not enough for the three steps, so the run ends INCOMPLETE and nothing is claimed.",
+      "inputs": {
+        "case_sha256": "e7fa9bcddd44118c699f67701b74f49f4ba916d801b2d9fd6087c0363e275396",
+        "script_sha256": "8a16d80641e50c92909d22b0fc714210d1f00faeb2a3c1a993fe3bb092b8dd5d"
+      }
+    }
+  ]
+}

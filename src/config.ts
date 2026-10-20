@@ -45,6 +45,8 @@ const ConfigSchema = z.strictObject({
     auditLog: z.string().min(1),
     // If this list is not empty, only these people can engage the switch.
     holders: z.array(z.string().min(1)),
+    // Resuming also needs a clean golden-set report that is newer than the engagement (manual: Roles and decision rights).
+    requireGoldenRun: z.boolean(),
     // Calls made against the target to revoke the runner's access, and to restore it on resume. Fixture-only defaults.
     revokeCalls: z.array(CallSchema),
     restoreCalls: z.array(CallSchema),
@@ -120,6 +122,15 @@ const ConfigSchema = z.strictObject({
     assertionTimeoutMs: z.number().int().min(0),
     // What to do with the run folders of a suite: keep only the ones a person should look at, or all of them.
     keepRuns: z.enum(["problems", "all"]),
+    // The golden set: verdicts frozen by a person. Any change in a verdict is reported, and a changed P1 verdict is flagged.
+    golden: z.strictObject({ file: z.string().min(1) }),
+    // The injection eval: hostile pages against the bot, each paired with a clean twin.
+    injection: z.strictObject({
+      // Hostile runs per scenario. With none steered, 20 runs show a failure rate of at most 13.9% (95%).
+      runs: z.number().int().min(1),
+      // The highest failure rate the data may still allow. With no failure at all, this is what sets the number of runs.
+      maxFailureUpperBound: z.number().min(0).max(1),
+    }),
     mutants: z.strictObject({
       // Lowest acceptable share of covered, checkable mutants that some covering case reports as FAIL.
       minDetectionRate: z.number().min(0).max(1),

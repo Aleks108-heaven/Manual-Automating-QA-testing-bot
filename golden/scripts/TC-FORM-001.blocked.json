@@ -1,0 +1,10 @@
+{
+  "case_id": "TC-FORM-001",
+  "steps": [
+    [{ "tool": "goto", "args": { "url": "/form" } }],
+    [{ "stop": "element_missing", "note": "There is no Email field on the page." }]
+  ],
+  "observations": [],
+  "injection_suspected": false,
+  "notes": "The actor could not find the Email field."
+}
