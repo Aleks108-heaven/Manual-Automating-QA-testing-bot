@@ -21,6 +21,24 @@ const ConfigSchema = z.strictObject({
   }),
   // Price per million tokens. Fixture placeholders: the real values depend on the provider, which is still [to fill].
   pricing: z.strictObject({ inputPerMTok: z.number().min(0), outputPerMTok: z.number().min(0) }),
+  // The pre-flight check (manual: Running tests). Every run starts with it, and a failed check stops the run.
+  preflight: z.strictObject({
+    // The target must answer GET /health. If false, that check is skipped (and a skipped check is reported as skipped).
+    requireHealthEndpoint: z.boolean(),
+    // The build the target must report. null means no particular build is required.
+    expectedBuild: z.string().min(1).nullable(),
+    // The provider must report at least this much spend allowance left, in US dollars.
+    minQuotaUsd: z.number().min(0),
+    // When true, the runner must be the pinned container image: QA_RUNNER_IMAGE_DIGEST must equal the Dockerfile's digest.
+    requireContainer: z.boolean(),
+    // When true, at least one canary case must be configured and must behave.
+    requireCanaries: z.boolean(),
+    // Cases run as a known-good pair: the case must PASS, and its negative control must FAIL.
+    canaryCases: z.array(z.string().min(1)),
+    dockerfile: z.string().min(1),
+    // Read from QA_RUNNER_IMAGE_DIGEST. The container run script sets it.
+    runnerImageDigest: z.string().nullable(),
+  }),
   // The kill switch (manual: Roles and decision rights, "Kill switch"). ${RUNS} stands for the runs directory.
   killSwitch: z.strictObject({
     stateFile: z.string().min(1),
@@ -107,6 +125,9 @@ export type Config = z.infer<typeof ConfigSchema>;
  *   QA_ASSERTION_TIMEOUT_MS     how long a check waits before it counts as a MISMATCH
  *   QA_BROWSER_SANDBOX=off      turn the Chromium sandbox off (only inside an isolating container)
  *   QA_SESSIONS_DIR             where session files live while a case runs (default: a temp folder)
+ *   QA_CANARY_CASES             comma-separated canary case files for the pre-flight check (empty means none)
+ *   QA_REQUIRE_CANARIES=0       do not fail the pre-flight check when no canary case is configured
+ *   QA_RUNNER_IMAGE_DIGEST      the digest of the container image the runner is in (set by the container script)
  */
 export function loadConfig(path = "config/default.json", env: NodeJS.ProcessEnv = process.env): Config {
   const config = ConfigSchema.parse(JSON.parse(readFileSync(path, "utf8")));
@@ -117,6 +138,9 @@ export function loadConfig(path = "config/default.json", env: NodeJS.ProcessEnv 
   if (env["QA_ASSERTION_TIMEOUT_MS"]) config.oracle.assertionTimeoutMs = Number(env["QA_ASSERTION_TIMEOUT_MS"]);
   if (env["QA_BROWSER_SANDBOX"] === "off") config.browser.sandbox = false;
   if (env["QA_SESSIONS_DIR"]) config.sessions.directory = env["QA_SESSIONS_DIR"];
+  if (env["QA_CANARY_CASES"] !== undefined) config.preflight.canaryCases = env["QA_CANARY_CASES"].split(",").map((c) => c.trim()).filter(Boolean);
+  if (env["QA_REQUIRE_CANARIES"] === "0") config.preflight.requireCanaries = false;
+  if (env["QA_RUNNER_IMAGE_DIGEST"]) config.preflight.runnerImageDigest = env["QA_RUNNER_IMAGE_DIGEST"];
   config.sessions.directory = config.sessions.directory.replace("${TMPDIR}", tmpdir());
   config.killSwitch.stateFile = config.killSwitch.stateFile.replace("${RUNS}", config.runs.directory);
   config.killSwitch.auditLog = config.killSwitch.auditLog.replace("${RUNS}", config.runs.directory);

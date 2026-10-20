@@ -14,6 +14,16 @@
     "inputPerMTok": 3,
     "outputPerMTok": 15
   },
+  "preflight": {
+    "requireHealthEndpoint": true,
+    "expectedBuild": "fixture-1",
+    "minQuotaUsd": 1,
+    "requireContainer": false,
+    "requireCanaries": true,
+    "canaryCases": ["cases/TC-FORM-001.yaml"],
+    "dockerfile": "Dockerfile",
+    "runnerImageDigest": null
+  },
   "killSwitch": {
     "stateFile": "${RUNS}/.kill-switch.json",
     "auditLog": "${RUNS}/.kill-switch-audit.jsonl",
