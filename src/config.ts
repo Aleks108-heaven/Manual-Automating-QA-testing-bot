@@ -19,7 +19,14 @@ const ConfigSchema = z.strictObject({
   oracle: z.strictObject({
     assertionTimeoutMs: z.number().int().min(0),
     assertionPollMs: z.number().int().min(10),
+    // A count must hold this long before it counts, so an element that appears a moment later is not missed.
+    stabilityMs: z.number().int().min(0),
+    // The network must be quiet this long before the runner evaluates the expected results of a step.
+    settleQuietMs: z.number().int().min(0),
+    settleMaxMs: z.number().int().min(0),
   }),
+  // Headers sent with setup and teardown calls to the application's test API (fixture only in M1).
+  testApi: z.strictObject({ headers: z.record(z.string(), z.string()) }),
   runs: z.strictObject({ directory: z.string().min(1) }),
 });
 export type Config = z.infer<typeof ConfigSchema>;

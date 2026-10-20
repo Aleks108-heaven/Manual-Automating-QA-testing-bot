@@ -14,7 +14,13 @@
   },
   "oracle": {
     "assertionTimeoutMs": 5000,
-    "assertionPollMs": 100
+    "assertionPollMs": 100,
+    "stabilityMs": 250,
+    "settleQuietMs": 150,
+    "settleMaxMs": 2000
+  },
+  "testApi": {
+    "headers": { "x-fixture-test": "1" }
   },
   "runs": {
     "directory": "runs"

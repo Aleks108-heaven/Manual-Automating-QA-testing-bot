@@ -81,6 +81,8 @@ export const RunRecordSchema = z.strictObject({
   outcomes: z.array(OutcomeRecordSchema),
   evidence: z.array(EvidenceRefSchema),
   guardrail_events: z.array(GuardrailEventSchema),
+  // A failed cleanup does not change the verdict. It is reported here for the staging owner.
+  cleanup_errors: z.array(z.string()),
   run_state: RunStateSchema,
   verdict: VerdictSchema,
   verdict_row: z.number().int().min(1).max(7),

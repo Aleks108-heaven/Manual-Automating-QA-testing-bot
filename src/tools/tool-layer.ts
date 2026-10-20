@@ -9,6 +9,7 @@ import { describeWhere, type Where } from "../schemas/common.ts";
 import type { GuardrailEvent } from "../schemas/run-record.ts";
 import { Allowlist } from "./allowlist.ts";
 import { GuardrailLog } from "./guardrail-log.ts";
+import { locatorFor } from "./locate.ts";
 import { TOOL_SCHEMAS, type ToolName, type ToolResult } from "./schemas.ts";
 
 export interface NetworkEntry {
@@ -28,6 +29,8 @@ export interface RunnerAccess {
   network(): readonly NetworkEntry[];
   consoleErrors(): readonly string[];
   setStep(step: number): void;
+  /** Waits until no request is in flight and the network has been quiet for quietMs (or maxMs passes). */
+  settle(quietMs: number, maxMs: number): Promise<void>;
   browserVersion: string;
   guardrails: GuardrailLog;
   targetOrigin: string;
@@ -58,6 +61,8 @@ export class ToolLayer {
   private current: Page;
   private step = 0;
   private shots = 0;
+  private inFlight = 0;
+  private lastNetworkActivity = Date.now();
 
   private readonly browser: Browser;
   private readonly context: BrowserContext;
@@ -138,11 +143,21 @@ export class ToolLayer {
       }
     });
 
+    context.on("request", () => {
+      this.inFlight += 1;
+      this.lastNetworkActivity = Date.now();
+    });
+    context.on("requestfinished", () => {
+      this.inFlight = Math.max(0, this.inFlight - 1);
+      this.lastNetworkActivity = Date.now();
+    });
     context.on("response", (response) => {
       const request = response.request();
       this.network.push(this.entryFor(request.method(), request.url(), response.status(), request.resourceType(), null));
     });
     context.on("requestfailed", (request) => {
+      this.inFlight = Math.max(0, this.inFlight - 1);
+      this.lastNetworkActivity = Date.now();
       const failure = request.failure()?.errorText ?? "failed";
       this.network.push(this.entryFor(request.method(), request.url(), null, request.resourceType(), failure));
       // Route handlers do not see redirect hops. The browser's host rule refuses them instead, and
@@ -222,6 +237,13 @@ export class ToolLayer {
       setStep: (step) => {
         this.step = step;
       },
+      settle: async (quietMs, maxMs) => {
+        const end = Date.now() + maxMs;
+        while (Date.now() < end) {
+          if (this.inFlight === 0 && Date.now() - this.lastNetworkActivity >= quietMs) return;
+          await new Promise((r) => setTimeout(r, 25));
+        }
+      },
       browserVersion: this.browser.version(),
       guardrails: this.guardrails,
       targetOrigin: this.options.targetOrigin,
@@ -229,10 +251,7 @@ export class ToolLayer {
   }
 
   private locate(where: Where): Locator {
-    const page = this.current;
-    if ("selector" in where) return page.locator(where.selector);
-    // Role locators cover the accessible-name matching the cases use. Cast: the case file carries a plain string.
-    return page.getByRole(where.role as Parameters<Page["getByRole"]>[0], where.name === undefined ? {} : { name: where.name, exact: true });
+    return locatorFor(this.current, where);
   }
 
   /** Runs one tool call. The model reaches the browser only through this method. */
