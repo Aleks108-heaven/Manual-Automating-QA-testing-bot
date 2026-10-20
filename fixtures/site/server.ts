@@ -1,7 +1,9 @@
 // The local fixture site. It is the only target the bot may run against until M5 passes and the
 // security review is done. Plain Node http, bound to 127.0.0.1. No real credentials or data.
+import { randomBytes } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { FIXTURE_SECRETS } from "../secrets.ts";
 
 export const DEFECTS = ["lockout-off-by-one", "email-check-missing", "wrong-email-message"] as const;
 export type DefectName = (typeof DEFECTS)[number];
@@ -27,8 +29,21 @@ export interface FixtureSite {
 }
 
 const BUILD = "fixture-1";
-const FIXTURE_PASSWORD = "Correct#Pass1"; // fixture-only; no case in M1 uses it
 const LOCK_MESSAGE = "Account locked. Try again in 15 minutes.";
+const SESSION_COOKIE = "fx_session";
+
+/** The password for a fixture user. Users the tests invent (through the seed endpoint) share one default. */
+function passwordFor(username: string): string {
+  return FIXTURE_SECRETS[`${username}.password`] ?? "Correct#Pass1";
+}
+
+function cookieFrom(req: IncomingMessage, name: string): string | null {
+  for (const part of String(req.headers.cookie ?? "").split(";")) {
+    const [k, ...rest] = part.trim().split("=");
+    if (k === name) return rest.join("=");
+  }
+  return null;
+}
 
 interface User {
   failed: number;
@@ -70,6 +85,12 @@ export async function startFixtureSite(options: FixtureOptions = {}): Promise<Fi
   assertKnownDefects(options.defects ?? []);
   let defects = new Set<string>(options.defects ?? []);
   const users = new Map<string, User>();
+  const sessions = new Map<string, string>(); // session token -> username
+
+  const sessionUser = (req: IncomingMessage): string | null => {
+    const token = cookieFrom(req, SESSION_COOKIE);
+    return token ? (sessions.get(token) ?? null) : null;
+  };
 
   const user = (name: string): User => {
     let u = users.get(name);
@@ -105,6 +126,7 @@ export async function startFixtureSite(options: FixtureOptions = {}): Promise<Fi
       }
       if (route === "POST /__test/reset") {
         users.clear();
+        sessions.clear();
         return json(res, 200, { ok: true });
       }
       if (route === "POST /__test/defects") {
@@ -200,9 +222,16 @@ export async function startFixtureSite(options: FixtureOptions = {}): Promise<Fi
         const u = user(String(body["username"] ?? ""));
         const lockAt = defects.has("lockout-off-by-one") ? 4 : 5;
         if (u.locked) return json(res, 423, { error: LOCK_MESSAGE });
-        if (body["password"] === FIXTURE_PASSWORD) {
+        if (body["password"] === passwordFor(String(body["username"] ?? ""))) {
           u.failed = 0;
-          return json(res, 200, { ok: true });
+          const token = `fxs_${randomBytes(18).toString("hex")}`;
+          sessions.set(token, String(body["username"]));
+          res.writeHead(200, {
+            "content-type": "application/json",
+            "x-build": BUILD,
+            "set-cookie": `${SESSION_COOKIE}=${token}; HttpOnly; Path=/; SameSite=Lax`,
+          });
+          return void res.end(JSON.stringify({ ok: true }));
         }
         u.failed += 1;
         if (u.failed >= lockAt) {
@@ -210,6 +239,60 @@ export async function startFixtureSite(options: FixtureOptions = {}): Promise<Fi
           return json(res, 423, { error: LOCK_MESSAGE });
         }
         return json(res, 401, { error: "Invalid username or password" });
+      }
+
+      case "GET /account": {
+        const who = sessionUser(req);
+        if (!who) return send(res, 302, "", "text/plain", { location: "/login" });
+        return send(
+          res,
+          200,
+          page(
+            "Account",
+            `<p>Welcome, ${who}</p><button id="logout" type="button">Log out</button>`,
+            `document.getElementById('logout').addEventListener('click', async () => { await fetch('/api/logout', {method:'POST'}); location.href = '/login'; });`,
+          ),
+        );
+      }
+
+      case "POST /api/logout":
+      case "GET /logout": {
+        const token = cookieFrom(req, SESSION_COOKIE);
+        if (token) sessions.delete(token);
+        const cleared = { "set-cookie": `${SESSION_COOKIE}=; HttpOnly; Path=/; Max-Age=0` };
+        return req.method === "GET" ? send(res, 302, "", "text/plain", { location: "/login", ...cleared }) : send(res, 200, JSON.stringify({ ok: true }), "application/json", cleared);
+      }
+
+      // Leak traps: a buggy application that puts secrets where the bot can see them.
+      case "GET /debug/session":
+        return send(res, 200, page("Debug", `<pre id="cookie-echo">Cookie: ${String(req.headers.cookie ?? "(none)")}</pre>`));
+
+      case "GET /debug/console-leak":
+        return send(
+          res,
+          200,
+          page("Console leak", `<p>Check the console.</p>`, `console.error('login failed for fixture_member with password ${FIXTURE_SECRETS["fixture_member.password"]}');`),
+        );
+
+      case "GET /apikey":
+        return send(
+          res,
+          200,
+          page(
+            "API key",
+            `<form id="f" novalidate><label for="k">API key</label><input id="k" name="key" type="text" autocomplete="off"><div id="msg"></div><button type="submit">Save key</button></form>`,
+            `document.getElementById('f').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const r = await fetch('/api/apikey', {method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({key: document.getElementById('k').value})});
+  const msg = document.getElementById('msg'); msg.textContent = '';
+  const p = document.createElement('p'); p.setAttribute('role', r.ok ? 'status' : 'alert'); p.textContent = r.ok ? 'Key accepted' : 'Key rejected'; msg.appendChild(p);
+});`,
+          ),
+        );
+
+      case "POST /api/apikey": {
+        const body = await readJson(req);
+        return body["key"] === FIXTURE_SECRETS["fixture_apikey.value"] ? json(res, 200, { ok: true }) : json(res, 403, { error: "Key rejected" });
       }
 
       case "GET /transient":

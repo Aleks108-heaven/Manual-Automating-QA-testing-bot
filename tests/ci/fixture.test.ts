@@ -1,6 +1,7 @@
 // The fixture site is test equipment. These tests make sure its rules and defect toggles behave,
 // because every later test trusts them.
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { FIXTURE_SECRETS } from "../../fixtures/secrets.ts";
 import { startFixtureSite, type FixtureSite } from "../../fixtures/site/server.ts";
 
 let site: FixtureSite;
@@ -64,6 +65,50 @@ describe("fixture site", () => {
     site.setDefects(["lockout-off-by-one"]);
     await post("/__test/seed", { username: "lock_test_01", failed_attempts: 3 }, T);
     expect((await post("/api/login", { username: "lock_test_01", password: "bad" })).status).toBe(423);
+  });
+
+  describe("sessions", () => {
+    const login = (username: string, password: string) => post("/api/login", { username, password });
+    const cookieOf = (res: Response) => (res.headers.getSetCookie()[0] ?? "").split(";")[0] ?? "";
+
+    it("sets an HttpOnly session cookie on a good login, and /account needs it", async () => {
+      const res = await login("fixture_member", FIXTURE_SECRETS["fixture_member.password"] as string);
+      expect(res.status).toBe(200);
+      expect(res.headers.getSetCookie()[0]).toMatch(/^fx_session=fxs_[0-9a-f]+; HttpOnly/);
+      const anonymous = await fetch(site.origin + "/account", { redirect: "manual" });
+      expect(anonymous.status).toBe(302);
+      const signedIn = await fetch(site.origin + "/account", { headers: { cookie: cookieOf(res) } });
+      expect(await signedIn.text()).toContain("Welcome, fixture_member");
+    });
+
+    it("gives every login its own session, and a logout ends only that one", async () => {
+      const password = FIXTURE_SECRETS["fixture_member.password"] as string;
+      const a = cookieOf(await login("fixture_member", password));
+      const b = cookieOf(await login("fixture_member", password));
+      expect(a).not.toBe(b);
+      await fetch(site.origin + "/logout", { redirect: "manual", headers: { cookie: a } }); // a state-changing GET
+      expect((await fetch(site.origin + "/account", { redirect: "manual", headers: { cookie: a } })).status).toBe(302);
+      expect((await fetch(site.origin + "/account", { redirect: "manual", headers: { cookie: b } })).status).toBe(200);
+    });
+
+    it("refuses a wrong password and gives no cookie", async () => {
+      const res = await login("fixture_member", "wrong");
+      expect(res.status).toBe(401);
+      expect(res.headers.getSetCookie()).toEqual([]);
+    });
+
+    it("clears sessions on reset", async () => {
+      const a = cookieOf(await login("fixture_member", FIXTURE_SECRETS["fixture_member.password"] as string));
+      await post("/__test/reset", {}, T);
+      expect((await fetch(site.origin + "/account", { redirect: "manual", headers: { cookie: a } })).status).toBe(302);
+    });
+
+    it("echoes the cookie on the leak trap page, and accepts only the right API key", async () => {
+      const echoed = await (await fetch(site.origin + "/debug/session", { headers: { cookie: "fx_session=abc" } })).text();
+      expect(echoed).toContain("Cookie: fx_session=abc");
+      expect((await post("/api/apikey", { key: "nope" })).status).toBe(403);
+      expect((await post("/api/apikey", { key: FIXTURE_SECRETS["fixture_apikey.value"] })).status).toBe(200);
+    });
   });
 
   it("rejects a defect name that does not exist, so a typo cannot run on a correct app", async () => {
