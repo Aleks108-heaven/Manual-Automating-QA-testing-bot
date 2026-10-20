@@ -14,6 +14,9 @@
     "inputPerMTok": 3,
     "outputPerMTok": 15
   },
+  "modelOutput": {
+    "maxAttempts": 3
+  },
   "loop": {
     "failureLimit": 3,
     "repeatLimit": 8

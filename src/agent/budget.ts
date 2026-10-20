@@ -38,7 +38,12 @@ export class BudgetGuard {
     this.now = now;
   }
 
+  private started = false;
+
+  /** Starts the clock. Only the first call counts, so the loop and the runner can both call it. */
   start(): void {
+    if (this.started) return;
+    this.started = true;
     this.startedAt = this.now();
   }
 

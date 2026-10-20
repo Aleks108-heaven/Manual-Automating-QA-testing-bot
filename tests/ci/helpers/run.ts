@@ -2,7 +2,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig, type Config } from "../../../src/config.ts";
-import type { FinalContext, ModelAction, ModelClient, ModelContext } from "../../../src/model/client.ts";
+import type { FinalContext, ModelAction, ModelClient, ModelContext, ModelUsage } from "../../../src/model/client.ts";
 import { ScriptedModelClient, type Script } from "../../../src/model/scripted.ts";
 import { runCase, type BuildProbe, type RunResult } from "../../../src/runner/run-case.ts";
 import type { SecretStore } from "../../../src/secrets/store.ts";
@@ -36,6 +36,9 @@ export class RecordingModel implements ModelClient {
   async finalOutput(context: FinalContext): Promise<unknown> {
     this.seen.push(JSON.stringify(context));
     return this.inner.finalOutput(context);
+  }
+  consumeUsage(): ModelUsage | undefined {
+    return this.inner.consumeUsage?.();
   }
 }
 

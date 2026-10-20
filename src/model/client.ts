@@ -33,11 +33,17 @@ export interface FinalContext {
   testCase: TestCase;
   /** Set when the actor itself stopped the run. */
   actorStop: { reason: ActorStopReason; step: number } | null;
+  /** 1 for the first request. Later requests follow a report that failed validation. */
+  attempt: number;
+  /** What was wrong with the previous report (field names and rules, never values), or null on the first attempt. */
+  previousError: string | null;
 }
 
 export interface ModelClient {
   readonly name: string;
   nextAction(context: ModelContext): Promise<ModelAction>;
-  /** Raw actor output JSON. The runner validates it against ActorOutputSchema. */
+  /** Raw actor output JSON. The runner validates it against ActorOutputSchema and never repairs it. */
   finalOutput(context: FinalContext): Promise<unknown>;
+  /** Tokens used since the last call to this method, for the cost budget. Optional. */
+  consumeUsage?(): ModelUsage | undefined;
 }

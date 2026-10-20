@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { z } from "zod";
 import { ACTOR_STOP_REASONS } from "../schemas/common.ts";
-import type { FinalContext, ModelAction, ModelClient, ModelContext } from "./client.ts";
+import type { FinalContext, ModelAction, ModelClient, ModelContext, ModelUsage } from "./client.ts";
 
 // A scripted fake model: it plays hand-written action sequences, one list per step. It makes CI
 // deterministic and free. It tests the bot's wiring, not a real model's judgment.
@@ -25,12 +25,20 @@ export const ScriptSchema = z.strictObject({
     .default([]),
   injection_suspected: z.boolean().default(false),
   notes: z.string().default(""),
+  // What the pretend model answers when asked for its final report, one entry per attempt (the last
+  // one repeats). The string "default" means the normal, valid report. Anything else is returned as
+  // it is, so tests can feed in malformed reports.
+  final_outputs: z.array(z.unknown()).optional(),
+  // Tokens the pretend model "used" for each final report attempt.
+  final_usage: z.strictObject({ input_tokens: z.number().int().min(0), output_tokens: z.number().int().min(0) }).optional(),
+  final_delay_ms: z.number().int().min(0).optional(),
 });
 export type Script = z.infer<typeof ScriptSchema>;
 
 export class ScriptedModelClient implements ModelClient {
   readonly name = "scripted";
   private readonly script: Script;
+  private pendingUsage: ModelUsage | undefined;
 
   constructor(script: Script) {
     this.script = ScriptSchema.parse(script);
@@ -54,7 +62,20 @@ export class ScriptedModelClient implements ModelClient {
     return { type: "tool_call", tool: item.tool, args: item.args, ...usage };
   }
 
+  consumeUsage(): ModelUsage | undefined {
+    const usage = this.pendingUsage;
+    this.pendingUsage = undefined;
+    return usage;
+  }
+
   async finalOutput(context: FinalContext): Promise<unknown> {
+    if (this.script.final_delay_ms) await new Promise((resolve) => setTimeout(resolve, this.script.final_delay_ms));
+    this.pendingUsage = this.script.final_usage;
+    const scripted = this.script.final_outputs;
+    if (scripted && scripted.length > 0) {
+      const entry = scripted[Math.min(context.attempt - 1, scripted.length - 1)];
+      if (entry !== "default") return entry;
+    }
     const stop = context.actorStop;
     return {
       test_id: context.testCase.id,

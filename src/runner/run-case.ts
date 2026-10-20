@@ -2,7 +2,9 @@
 import { createHash, randomBytes } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { BudgetGuard, type BudgetStop } from "../agent/budget.ts";
 import { runAgentLoop, type LoopResult } from "../agent/loop.ts";
+import { requestFinalOutput } from "./final-output.ts";
 import type { Config } from "../config.ts";
 import type { ModelClient } from "../model/client.ts";
 import { FileEvidenceSink } from "../oracle/evidence.ts";
@@ -11,7 +13,7 @@ import { scanArtifacts, type Finding } from "../redact/scan.ts";
 import { EnvSecretStore, parseSecretRef, type SecretStore } from "../secrets/store.ts";
 import { establishSession, SessionError, type EstablishedSession } from "../sessions/session-setup.ts";
 import type { Call, TestCase } from "../schemas/case.ts";
-import { ActorOutputSchema, type ActorOutput } from "../schemas/actor.ts";
+import type { ActorOutput } from "../schemas/actor.ts";
 import { RunRecordSchema, type RunRecord } from "../schemas/run-record.ts";
 import { ToolLayer, type RunnerAccess } from "../tools/tool-layer.ts";
 import { calculateVerdict } from "../verdict/calculate.ts";
@@ -96,6 +98,11 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
   let sink: FileEvidenceSink | null = null;
   let session: EstablishedSession | null = null;
   const redactor = new Redactor();
+  // One budget for the whole run: the agent loop, the final report and, later, the judge spend from it.
+  const guard = new BudgetGuard(config.budgets, config.pricing);
+  let finalBudgetStop: BudgetStop | null = null;
+  let blocked: RunRecord["blocked"] = null;
+  let modelOutput: { attempts: number; valid: boolean; errors: string[] } = { attempts: 0, valid: false, errors: [] };
   // The raw HAR holds cookies and request bodies. It lives here, outside the run directory, until it is scrubbed.
   const harScratchDir = join(config.sessions.directory, `${runId}-har`);
 
@@ -163,20 +170,33 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
         config,
         evidence: sink,
         redactor,
+        guard,
         transcript: (entry) => appendFileSync(join(runDir, "model-context.jsonl"), `${JSON.stringify(entry)}\n`),
       });
 
+      // A BLOCKED run needs the step, the reason and a screenshot (manual: Definitions). The runner takes the
+      // screenshot at the moment of the stop, so it does not depend on what the model reports.
+      if (loop.actorStop) {
+        const { step, reason } = loop.actorStop;
+        const lastFailure = [...(loop.steps[step - 1]?.actions ?? [])].reverse().find((a) => !a.ok);
+        const refs = await sink.capture(`blocked-step${step}`, step);
+        blocked = {
+          step,
+          step_text: loop.steps[step - 1]?.text ?? "",
+          reason,
+          source: loop.stopSource ?? "actor",
+          tool_error: lastFailure?.error ? redactor.scrubText(lastFailure.error) : null,
+          evidence: refs.map((r) => r.id),
+        };
+      }
+
       // A stop decided by the runner (the loop detector) leaves nothing for the model to report.
       if (loop.runnerStop === null && !loop.guardrailBlock && loop.stopSource !== "runner") {
-        const raw = await model.finalOutput({ testCase, actorStop: loop.actorStop });
-        const parsed = ActorOutputSchema.safeParse(raw);
-        if (!parsed.success) {
-          fail(`the actor output is invalid: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
-        } else if ((parsed.data.stop_reason ?? null) !== (loop.actorStop?.reason ?? null)) {
-          fail("the actor output disagrees with how the run ended");
-        } else {
-          output = parsed.data;
-        }
+        const final = await requestFinalOutput({ model, testCase, actorStop: loop.actorStop, guard, config, redactor });
+        modelOutput = { attempts: final.attempts, valid: final.output !== null, errors: final.errors };
+        output = final.output;
+        if (final.budgetStop) finalBudgetStop = final.budgetStop;
+        else if (!output) fail(`the model's final report stayed invalid after ${final.attempts} attempts (${final.errors[final.errors.length - 1] ?? "no detail"})`);
       }
     }
   } catch (error) {
@@ -214,7 +234,7 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
   const runState = {
     actor_stop_reason: loop?.actorStop?.reason ?? null,
     stop_source: loop?.stopSource ?? null,
-    runner_stop_reason: runnerStopOverride ?? loop?.runnerStop ?? null,
+    runner_stop_reason: runnerStopOverride ?? loop?.runnerStop ?? finalBudgetStop?.reason ?? null,
     infrastructure_failure: infrastructureFailure,
     guardrail_block: loop?.guardrailBlock ?? false,
     injection_suspected: output?.injection_suspected ?? false,
@@ -231,7 +251,7 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
   });
 
   const record: RunRecord = RunRecordSchema.parse({
-    schema_version: 1,
+    schema_version: 2,
     run_id: runId,
     case: { id: testCase.id, title: testCase.title, priority: testCase.priority, source: options.caseSource },
     started_at: startedAt,
@@ -266,9 +286,11 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
         max_wall_ms: config.budgets.maxWallMs,
         max_cost_usd: config.budgets.maxCostUsd,
       },
-      used: loop?.budget ?? { tool_calls: 0, wall_ms: 0, cost_usd: 0, input_tokens: 0, output_tokens: 0 },
-      stop: loop?.budgetStop ?? null,
+      used: loop ? guard.snapshot() : { tool_calls: 0, wall_ms: 0, cost_usd: 0, input_tokens: 0, output_tokens: 0 },
+      stop: loop?.budgetStop ?? finalBudgetStop ?? null,
     },
+    blocked,
+    model_output: modelOutput,
     redaction: { secrets_tracked: redactor.secretCount, replacements: redactor.replacements },
     artifact_scan: { files_scanned: scan.filesScanned, findings: scan.findings.length, cleaned: scan.findings.length > 0 },
     artifacts: {

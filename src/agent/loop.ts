@@ -23,6 +23,8 @@ export interface LoopOptions {
   /** Receives everything the model is shown and does, already scrubbed. The runner stores it. */
   transcript?: (entry: Record<string, unknown>) => void;
   redactor?: Redactor;
+  /** The run's budget. The runner shares it with the final report and the judge, so they spend the same time and cost. */
+  guard?: BudgetGuard;
   /** For tests: a clock the budget uses. */
   now?: () => number;
 }
@@ -54,7 +56,7 @@ function stableJson(value: unknown): string {
 export async function runAgentLoop(options: LoopOptions): Promise<LoopResult> {
   const { testCase, model, tools, access, config, evidence, transcript, redactor } = options;
   const note = (entry: Record<string, unknown>) => transcript?.(redactor ? redactor.scrubJson(entry) : entry);
-  const guard = new BudgetGuard(config.budgets, config.pricing, options.now);
+  const guard = options.guard ?? new BudgetGuard(config.budgets, config.pricing, options.now);
   guard.start();
 
   const steps: StepRecord[] = [];

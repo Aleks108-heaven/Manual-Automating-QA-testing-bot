@@ -80,9 +80,11 @@ export const BudgetRecordSchema = z.strictObject({
 });
 export type BudgetRecord = z.infer<typeof BudgetRecordSchema>;
 
-// Run record, schema version 1 (M2). Version 0 (M1) had no session, budget, redaction or scan sections.
+// Run record, schema version 2 (M3). Version 0 (M1) had no session, budget, redaction or scan sections (added in
+// version 1, M2). Version 2 adds how the model's final report fared, and the judge, implicit-check and
+// blocked-step sections.
 export const RunRecordSchema = z.strictObject({
-  schema_version: z.literal(1),
+  schema_version: z.literal(2),
   run_id: z.string().min(1),
   case: z.strictObject({ id: z.string(), title: z.string(), priority: z.string(), source: z.string() }),
   started_at: z.string(),
@@ -109,6 +111,20 @@ export const RunRecordSchema = z.strictObject({
   // The role the case ran as and how its session was made. Never the session file or any token.
   session: z.strictObject({ role: z.string(), mode: z.literal("per-case"), established: z.boolean() }),
   budget: BudgetRecordSchema,
+  // Set when the run stopped because a step could not be performed (BLOCKED). The manual requires the step, the
+  // reason and a screenshot. The runner captures the screenshot itself, at the moment of the stop.
+  blocked: z
+    .strictObject({
+      step: z.number().int().min(1),
+      step_text: z.string(),
+      reason: z.enum(ACTOR_STOP_REASONS),
+      source: z.enum(["actor", "runner"]),
+      tool_error: z.string().nullable(),
+      evidence: z.array(z.string()),
+    })
+    .nullable(),
+  // How the model's final report fared: how many times it was requested, and why each rejected one was rejected.
+  model_output: z.strictObject({ attempts: z.number().int(), valid: z.boolean(), errors: z.array(z.string()) }),
   // How much was scrubbed. Counts only, never values.
   redaction: z.strictObject({ secrets_tracked: z.number().int(), replacements: z.number().int() }),
   // The final scan of everything stored. findings above 0 means the scrubber has a defect.
