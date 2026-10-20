@@ -14,6 +14,13 @@
     "inputPerMTok": 3,
     "outputPerMTok": 15
   },
+  "killSwitch": {
+    "stateFile": "${RUNS}/.kill-switch.json",
+    "auditLog": "${RUNS}/.kill-switch-audit.jsonl",
+    "holders": [],
+    "revokeCalls": [{ "call": "POST /__test/revoke", "description": "End every session and disable the bot accounts (fixture)" }],
+    "restoreCalls": [{ "call": "POST /__test/restore", "description": "Enable the bot accounts again (fixture)" }]
+  },
   "mutations": {
     "alwaysAllow": [],
     "stateChangingGets": ["/logout", "/signout", "/sign-out", "/delete*", "/remove*"]

@@ -14,6 +14,7 @@ import type { ExpectedResult, TestCase } from "../schemas/case.ts";
 import type { ActorStopReason, RunnerStopReason } from "../schemas/common.ts";
 import type { OutcomeRecord, StepRecord } from "../schemas/run-record.ts";
 import type { RunnerAccess, ToolLayer } from "../tools/tool-layer.ts";
+import type { PauseSource } from "../ops/kill-switch.ts";
 import { BudgetGuard, DeadlineExceeded, withDeadline, type BudgetSnapshot, type BudgetStop } from "./budget.ts";
 
 export interface LoopOptions {
@@ -32,6 +33,8 @@ export interface LoopOptions {
   judge?: JudgeClient;
   /** Collects the implicit findings after each step. */
   implicit?: ImplicitCollector;
+  /** The kill switch. When it is engaged the run stops at once, as INCOMPLETE. */
+  pause?: PauseSource;
   /** The run's budget. The runner shares it with the final report and the judge, so they spend the same time and cost. */
   guard?: BudgetGuard;
   /** For tests: a clock the budget uses. */
@@ -51,6 +54,34 @@ export interface LoopResult {
   budget: BudgetSnapshot;
   /** How the judge was used: batches asked, attempts made, rejected answers, results with an injection report. */
   judge: { calls: number; attempts: number; errors: string[]; injection: number };
+}
+
+const KILLED = Symbol("killed");
+
+/**
+ * Waits for a promise, but gives up as soon as the kill switch is engaged. Polls the switch every 100 ms, so a
+ * model call or a tool call that is stuck cannot keep a paused runner busy.
+ */
+function raceKill<T>(promise: Promise<T>, pause: PauseSource | undefined): Promise<T | typeof KILLED> {
+  if (!pause) return promise;
+  return new Promise((resolve, reject) => {
+    const timer = setInterval(() => {
+      if (pause.isPaused()) {
+        clearInterval(timer);
+        resolve(KILLED);
+      }
+    }, 100);
+    promise.then(
+      (value) => {
+        clearInterval(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearInterval(timer);
+        reject(error);
+      },
+    );
+  });
 }
 
 function stableJson(value: unknown): string {
@@ -87,6 +118,11 @@ export async function runAgentLoop(options: LoopOptions): Promise<LoopResult> {
   let failSignature = "";
   let failStreak = 0;
 
+  const stopForKill = (step: number) => {
+    runnerStop = "killed";
+    note({ t: "killed", step });
+  };
+
   const stopForBudget = (stop: BudgetStop, step: number) => {
     budgetStop = stop;
     runnerStop = stop.reason;
@@ -102,20 +138,29 @@ export async function runAgentLoop(options: LoopOptions): Promise<LoopResult> {
     note({ t: "step", step: index, text: stepText });
 
     for (;;) {
+      if (options.pause?.isPaused()) {
+        stopForKill(index);
+        break stepLoop;
+      }
       const before = guard.check(prior.length);
       if (before) {
         stopForBudget(before, index);
         break stepLoop;
       }
 
-      let action;
+      let proposed;
       try {
-        action = await withDeadline(model.nextAction({ testCase, stepIndex: index, stepText, actionsInStep: prior }), guard.remainingMs);
+        proposed = await raceKill(withDeadline(model.nextAction({ testCase, stepIndex: index, stepText, actionsInStep: prior }), guard.remainingMs), options.pause);
       } catch (error) {
         if (!(error instanceof DeadlineExceeded)) throw error;
         stopForBudget({ reason: "timeout", detail: `time limit of ${config.budgets.maxWallMs} ms reached while waiting for the model` }, index);
         break stepLoop;
       }
+      if (proposed === KILLED) {
+        stopForKill(index);
+        break stepLoop;
+      }
+      const action = proposed;
       guard.chargeUsage(action.usage);
 
       if (action.type === "step_done") break;
@@ -135,14 +180,19 @@ export async function runAgentLoop(options: LoopOptions): Promise<LoopResult> {
 
       toolCalls += 1;
       guard.chargeToolCall();
-      let result;
+      let outcome;
       try {
-        result = await withDeadline(tools.call(action.tool, action.args), guard.remainingMs);
+        outcome = await raceKill(withDeadline(tools.call(action.tool, action.args), guard.remainingMs), options.pause);
       } catch (error) {
         if (!(error instanceof DeadlineExceeded)) throw error;
         stopForBudget({ reason: "timeout", detail: `time limit of ${config.budgets.maxWallMs} ms reached during ${action.tool}` }, index);
         break stepLoop;
       }
+      if (outcome === KILLED) {
+        stopForKill(index);
+        break stepLoop;
+      }
+      const result = outcome;
       note({ t: "tool", step: index, tool: action.tool, args: action.args, result: result.ok ? { ok: true, data: result.data } : { ok: false, code: result.code, message: result.message } });
       prior.push({ tool: action.tool, args: action.args, result: result.ok ? { ok: true, data: result.data } : { ok: false, code: result.code, message: result.message } });
       record.actions.push({
@@ -211,7 +261,8 @@ export async function runAgentLoop(options: LoopOptions): Promise<LoopResult> {
 
     // Implicit checks run after the expected results, and only report. They never become outcomes.
     await options.implicit?.collectAfterStep(index);
-    if (budgetStop || access.guardrails.blocked) break;
+    if (options.pause?.isPaused()) stopForKill(index);
+    if (budgetStop || runnerStop || access.guardrails.blocked) break;
   }
 
   return {

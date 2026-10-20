@@ -11,7 +11,7 @@ export const PRECEDENCE_ROWS: ReadonlyArray<{ row: number; verdict: Verdict }> =
   { row: 2, verdict: "INCONCLUSIVE" }, // a guardrail block fired
   { row: 3, verdict: "FAIL" }, // any expected result is a MISMATCH
   { row: 4, verdict: "BLOCKED" }, // a step could not be performed
-  { row: 5, verdict: "INCOMPLETE" }, // a budget or timeout stopped the run
+  { row: 5, verdict: "INCOMPLETE" }, // a budget, a timeout or the kill switch stopped the run
   { row: 6, verdict: "INCONCLUSIVE" }, // NO_EVIDENCE, or an expected result never reached
   { row: 7, verdict: "PASS" }, // every expected result is a MATCH
 ];
@@ -49,8 +49,8 @@ export function calculateVerdict(input: VerdictInput): VerdictResult {
   if (outcomes.some((o) => o.outcome === "MISMATCH")) return { verdict: "FAIL", row: 3 };
   // 4. The run stopped because a step could not be performed.
   if (runState.actorStopReason !== null) return { verdict: "BLOCKED", row: 4 };
-  // 5. The run stopped on a budget or a timeout.
-  if (runState.runnerStopReason === "budget" || runState.runnerStopReason === "timeout") return { verdict: "INCOMPLETE", row: 5 };
+  // 5. The run stopped on a budget, a timeout, or the kill switch.
+  if (runState.runnerStopReason === "budget" || runState.runnerStopReason === "timeout" || runState.runnerStopReason === "killed") return { verdict: "INCOMPLETE", row: 5 };
   // 6. Evidence is missing, or an expected result was never reached.
   const matched = outcomes.filter((o) => o.outcome === "MATCH").length;
   if (outcomes.some((o) => o.outcome === "NO_EVIDENCE") || outcomes.length < input.expectedCount) return { verdict: "INCONCLUSIVE", row: 6 };

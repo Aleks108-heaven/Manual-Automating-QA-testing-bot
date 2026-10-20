@@ -35,7 +35,7 @@ describe("T18 the precedence table in the manual and in the code", () => {
 type Presence = "absent" | Outcome;
 const PRESENCES: Presence[] = ["absent", "MATCH", "MISMATCH", "NO_EVIDENCE"];
 const ACTOR_STOPS: Array<ActorStopReason | null> = [null, "element_missing", "step_ambiguous", "loop"];
-const RUNNER_STOPS: Array<RunnerStopReason | null> = [null, "budget", "timeout", "crash"];
+const RUNNER_STOPS: Array<RunnerStopReason | null> = [null, "budget", "timeout", "crash", "killed"];
 
 function* allInputs(): Generator<VerdictInput> {
   for (const infra of [null, "host unreachable"]) {
@@ -65,7 +65,7 @@ function reference(input: VerdictInput): Verdict {
   if (s.guardrailBlock) return "INCONCLUSIVE"; // 2
   if (outcomes.includes("MISMATCH")) return "FAIL"; // 3
   if (s.actorStopReason !== null) return "BLOCKED"; // 4
-  if (s.runnerStopReason === "budget" || s.runnerStopReason === "timeout") return "INCOMPLETE"; // 5
+  if (s.runnerStopReason === "budget" || s.runnerStopReason === "timeout" || s.runnerStopReason === "killed") return "INCOMPLETE"; // 5
   if (outcomes.includes("NO_EVIDENCE") || outcomes.length < input.expectedCount) return "INCONCLUSIVE"; // 6
   return "PASS"; // 7
 }
@@ -74,7 +74,7 @@ describe("T18 every combination", () => {
   const inputs = [...allInputs()];
 
   it("covers about a thousand combinations", () => {
-    expect(inputs.length).toBe(2 * 2 * 4 * 4 * 16);
+    expect(inputs.length).toBe(2 * 2 * 4 * 5 * 16);
   });
 
   it("agrees with the table written out independently, for every combination", () => {
@@ -100,6 +100,7 @@ describe("T18 every combination", () => {
       { ...base, runState: { ...base.runState, runnerStopReason: "budget" } },
       { ...base, runState: { ...base.runState, runnerStopReason: "timeout" } },
       { ...base, runState: { ...base.runState, runnerStopReason: "crash" } },
+      { ...base, runState: { ...base.runState, runnerStopReason: "killed" } },
       { ...base, outcomes: [base.outcomes[0] as VerdictInput["outcomes"][number]] },
       { ...base, outcomes: [{ expected_ref: "e1", outcome: "MATCH" }, { expected_ref: "e2", outcome: "NO_EVIDENCE" }] },
       { ...base, outcomes: [{ expected_ref: "e1", outcome: "MATCH" }, { expected_ref: "e2", outcome: "MISMATCH" }] },

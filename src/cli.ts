@@ -20,6 +20,9 @@ import type { RunRecord } from "./schemas/run-record.ts";
 import { assertKnownDefects, startFixtureSite, type FixtureSite } from "../fixtures/site/server.ts";
 
 const USAGE = `Usage: node src/cli.ts run <case.yaml> [options]
+       node src/cli.ts kill-switch status
+       node src/cli.ts kill-switch engage --by <name> --reason <text>
+       node src/cli.ts kill-switch resume --by <name> --review <ref> --fix <ref> --preflight-report <file>
 
 Options:
   --script <file>        Scripted model actions (default: tests/ci/scripts/<case id>.json)

@@ -22,7 +22,7 @@ A run that is not PASS needs a person before release when the case is P1. This i
 | 2 | A guardrail block fired: an undeclared mutation or an off-allowlist navigation was refused. The run stops, the block is reported and alerted, and a person triages it | INCONCLUSIVE |
 | 3 | Any expected result has outcome MISMATCH | FAIL |
 | 4 | The run stopped because a step could not be performed: element missing, step ambiguous, or the same action failing repeatedly | BLOCKED |
-| 5 | The run stopped on a budget or a timeout | INCOMPLETE |
+| 5 | The run stopped on a budget, a timeout, or the kill switch | INCOMPLETE |
 | 6 | Any expected result has outcome NO_EVIDENCE, or was never reached | INCONCLUSIVE |
 | 7 | Every expected result has outcome MATCH | PASS |
 

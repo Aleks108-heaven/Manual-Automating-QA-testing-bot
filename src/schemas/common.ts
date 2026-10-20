@@ -15,7 +15,8 @@ export const OutcomeSchema = z.enum(OUTCOMES);
 export const ACTOR_STOP_REASONS = ["element_missing", "step_ambiguous", "loop"] as const;
 export type ActorStopReason = (typeof ACTOR_STOP_REASONS)[number];
 
-export const RUNNER_STOP_REASONS = ["budget", "timeout", "crash"] as const;
+// killed: the kill switch was engaged while the run was going.
+export const RUNNER_STOP_REASONS = ["budget", "timeout", "crash", "killed"] as const;
 export type RunnerStopReason = (typeof RUNNER_STOP_REASONS)[number];
 
 /** How a case or a tool names an element: by accessible role and name, or by selector. */

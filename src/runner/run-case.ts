@@ -7,6 +7,7 @@ import { runAgentLoop, type LoopResult } from "../agent/loop.ts";
 import { requestFinalOutput } from "./final-output.ts";
 import { ImplicitCollector } from "../implicit/collect.ts";
 import type { JudgeClient } from "../judge/client.ts";
+import { RunnerPausedError, type KillSwitch, type PauseSource } from "../ops/kill-switch.ts";
 import type { Config } from "../config.ts";
 import type { ModelClient } from "../model/client.ts";
 import { FileEvidenceSink } from "../oracle/evidence.ts";
@@ -49,6 +50,8 @@ export interface RunOptions {
   secrets?: SecretStore;
   /** Decides the judged expected results. Without one they get NO_EVIDENCE. */
   judge?: JudgeClient;
+  /** The kill switch. A paused runner does not start, and a running run stops when it is engaged. */
+  pause?: PauseSource;
 }
 
 export interface RunResult {
@@ -86,6 +89,8 @@ function newRunId(caseId: string): string {
 
 export async function runCase(options: RunOptions): Promise<RunResult> {
   const { testCase, config, model, targetOrigin } = options;
+  // A paused runner does not start runs. This check is the last line of defense, after the pre-flight check.
+  if (options.pause?.isPaused()) throw new RunnerPausedError((options.pause as Partial<KillSwitch>).status?.() ?? { paused: true });
   const probe = options.buildProbe ?? defaultBuildProbe;
   const runId = newRunId(testCase.id);
   const runDir = join(config.runs.directory, runId);
@@ -180,6 +185,7 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
         guard,
         runDir,
         implicit,
+        ...(options.pause ? { pause: options.pause } : {}),
         ...(options.judge ? { judge: options.judge } : {}),
         transcript: (entry) => appendFileSync(join(runDir, "model-context.jsonl"), `${JSON.stringify(entry)}\n`),
       });

@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { z } from "zod";
+import { CallSchema } from "./schemas/case.ts";
 import { isValidDeclaration } from "./tools/mutations.ts";
 
 // Every value the manual marks [to fill] is read from here, never hard-coded elsewhere.
@@ -20,6 +21,16 @@ const ConfigSchema = z.strictObject({
   }),
   // Price per million tokens. Fixture placeholders: the real values depend on the provider, which is still [to fill].
   pricing: z.strictObject({ inputPerMTok: z.number().min(0), outputPerMTok: z.number().min(0) }),
+  // The kill switch (manual: Roles and decision rights, "Kill switch"). ${RUNS} stands for the runs directory.
+  killSwitch: z.strictObject({
+    stateFile: z.string().min(1),
+    auditLog: z.string().min(1),
+    // If this list is not empty, only these people can engage the switch.
+    holders: z.array(z.string().min(1)),
+    // Calls made against the target to revoke the runner's access, and to restore it on resume. Fixture-only defaults.
+    revokeCalls: z.array(CallSchema),
+    restoreCalls: z.array(CallSchema),
+  }),
   // Requests that change state are blocked unless the case declares them (manual: Guardrails, "Risky actions").
   mutations: z.strictObject({
     // Always allowed. Supplied by the staging owner, for example a telemetry endpoint the application calls on its own.
@@ -107,5 +118,7 @@ export function loadConfig(path = "config/default.json", env: NodeJS.ProcessEnv 
   if (env["QA_BROWSER_SANDBOX"] === "off") config.browser.sandbox = false;
   if (env["QA_SESSIONS_DIR"]) config.sessions.directory = env["QA_SESSIONS_DIR"];
   config.sessions.directory = config.sessions.directory.replace("${TMPDIR}", tmpdir());
+  config.killSwitch.stateFile = config.killSwitch.stateFile.replace("${RUNS}", config.runs.directory);
+  config.killSwitch.auditLog = config.killSwitch.auditLog.replace("${RUNS}", config.runs.directory);
   return ConfigSchema.parse(config);
 }

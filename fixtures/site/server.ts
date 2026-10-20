@@ -88,6 +88,7 @@ export async function startFixtureSite(options: FixtureOptions = {}): Promise<Fi
   const sessions = new Map<string, string>(); // session token -> username
   // Every request that changes state and reached this server. A blocked request must never appear here.
   const hits: string[] = [];
+  let accountsDisabled = false;
 
   const sessionUser = (req: IncomingMessage): string | null => {
     const token = cookieFrom(req, SESSION_COOKIE);
@@ -127,10 +128,21 @@ export async function startFixtureSite(options: FixtureOptions = {}): Promise<Fi
         return json(res, 200, { ok: true });
       }
       if (route === "GET /__test/hits") return json(res, 200, { hits: [...hits] });
+      // The kill switch's revoke and restore calls: end every session and disable logins, or enable them again.
+      if (route === "POST /__test/revoke") {
+        sessions.clear();
+        accountsDisabled = true;
+        return json(res, 200, { ok: true, accounts_disabled: true });
+      }
+      if (route === "POST /__test/restore") {
+        accountsDisabled = false;
+        return json(res, 200, { ok: true, accounts_disabled: false });
+      }
       if (route === "POST /__test/reset") {
         users.clear();
         sessions.clear();
         hits.length = 0;
+        accountsDisabled = false;
         return json(res, 200, { ok: true });
       }
       if (route === "GET /__test/sessions") {
@@ -305,6 +317,7 @@ document.getElementById('ws').onclick = () => {
 
       case "POST /api/login": {
         const body = await readJson(req);
+        if (accountsDisabled) return json(res, 403, { error: "Account disabled" });
         const u = user(String(body["username"] ?? ""));
         const lockAt = defects.has("lockout-off-by-one") ? 4 : 5;
         if (u.locked) return json(res, 423, { error: LOCK_MESSAGE });

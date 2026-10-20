@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig, type Config } from "../../../src/config.ts";
 import type { JudgeClient } from "../../../src/judge/client.ts";
+import type { PauseSource } from "../../../src/ops/kill-switch.ts";
 import type { FinalContext, ModelAction, ModelClient, ModelContext, ModelUsage } from "../../../src/model/client.ts";
 import { ScriptedModelClient, type Script } from "../../../src/model/scripted.ts";
 import { runCase, type BuildProbe, type RunResult } from "../../../src/runner/run-case.ts";
@@ -15,6 +16,10 @@ export function testConfig(change: (c: Config) => void = () => undefined): Confi
   config.runs.directory = mkdtempSync(join(tmpdir(), "qa-bot-runs-"));
   // A private folder per test for session files and the raw HAR, never inside the runs directory.
   config.sessions.directory = mkdtempSync(join(tmpdir(), "qa-bot-sessions-"));
+  // The kill switch's state and audit log live apart from the runs, so a test can count the runs.
+  const ops = mkdtempSync(join(tmpdir(), "qa-bot-ops-"));
+  config.killSwitch.stateFile = join(ops, "kill-switch.json");
+  config.killSwitch.auditLog = join(ops, "kill-switch-audit.jsonl");
   // Keep the suite quick: the fixture answers in milliseconds, and a MISMATCH waits out the whole timeout.
   config.oracle.assertionTimeoutMs = 1000;
   change(config);
@@ -53,6 +58,7 @@ export async function runScripted(options: {
   /** Use this model instead of building one from `script`. */
   model?: ModelClient;
   judge?: JudgeClient;
+  pause?: PauseSource;
 }): Promise<RunResult> {
   const model = options.model ?? (typeof options.script === "string" ? ScriptedModelClient.fromFile(options.script) : new ScriptedModelClient(options.script));
   return runCase({
@@ -64,5 +70,6 @@ export async function runScripted(options: {
     ...(options.buildProbe ? { buildProbe: options.buildProbe } : {}),
     ...(options.secrets ? { secrets: options.secrets } : {}),
     ...(options.judge ? { judge: options.judge } : {}),
+    ...(options.pause ? { pause: options.pause } : {}),
   });
 }
