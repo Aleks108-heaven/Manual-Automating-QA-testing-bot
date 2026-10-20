@@ -5,7 +5,8 @@ Manual pages: docs/manual/ (index: 00-index.md). Build brief and milestones: doc
 Open only the page you need. Do not read the whole manual every session.
 
 ## Stack (decided 20 Oct 2026)
-- TypeScript, Playwright, Vitest, YAML case files. Other decisions are tracked in the build brief.
+- Core: TypeScript, Playwright, Vitest, YAML case files. Other decisions are tracked in the build brief.
+- Python is supported as a client of the core, never as a second implementation of it (build brief: Language support). Do not duplicate the tool layer, oracle, or verdict calculator in another language.
 
 ## Non-negotiable rules
 - Verdicts are PASS, FAIL, BLOCKED, INCONCLUSIVE, INCOMPLETE (manual: Definitions). Only PASS is verified.

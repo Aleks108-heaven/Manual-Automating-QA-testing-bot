@@ -17,6 +17,14 @@ Eight decisions are tracked here, and Claude Code should not guess any of them. 
 | Where the runner runs | A container in CI or a dedicated host; it must support default-deny egress | [to fill] | M4 |
 | Evidence storage | Access-controlled, with the retention tiers from the Data handling rules page. Until it is chosen, M2 writes to a local directory that is git-ignored | [to fill] | M5 |
 
+**Language support.** There is one implementation of the core (the tool layer, oracle, verdict calculator, and run record), in TypeScript. Other languages use the bot through language-neutral contracts, not through a rewrite. This keeps the security-critical code in one place, so the guardrails cannot drift between implementations.
+
+- The contracts are the YAML case format, the JSON schemas (case, run record, report), and a command-line interface. Any language can write cases, start runs, and read reports through them.
+- Python (decided 20 Oct 2026) is the first supported client language. After M6, add a thin Python package that wraps the command-line interface and gives typed access to the report. It contains no verdict logic. It is not part of M1 to M6.
+- The freezer (M7) can export to any language Playwright supports (TypeScript, Python, Java, .NET). Start with TypeScript, and add Python as a second export target when a team asks for it.
+- The application under test can be written in any language, because the bot drives it through the browser.
+- Java, JavaScript and other clients are added only on demand, as thin wrappers like the Python one, never as new cores.
+
 **Fixed constraint.** Use a thin custom agent loop on the chosen provider's tool-calling API. Do not use a shell-capable agent runner for the bot itself, because the guardrails forbid a shell and model-written scripts.
 
 ## Modules and interfaces
@@ -117,6 +125,8 @@ cases/               YAML test cases (created in M1)
 fixtures/
   site/              the fixture site, with toggleable defects (M1)
 src/                 one folder per module (M1 onward)
+clients/
+  python/            thin Python wrapper over the CLI and JSON schemas (after M6)
 tests/
   ci/                deterministic tests
   eval/              live-model scenarios and their thresholds
