@@ -72,6 +72,8 @@ export const RunRecordSchema = z.strictObject({
     node: z.string(),
     playwright: z.string(),
     browser: z.string(),
+    // false means the Chromium sandbox was off for this run. It is only acceptable inside an isolating container.
+    browser_sandbox: z.boolean(),
     model_client: z.string(),
     prompt_hashes: z.record(z.string(), z.string()),
     build: z.string().nullable(),

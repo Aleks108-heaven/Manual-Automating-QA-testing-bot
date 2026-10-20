@@ -23,6 +23,8 @@ npm run run-case -- cases/TC-AUTH-003.yaml                      # expect PASS
 npm run run-case -- cases/TC-AUTH-003.yaml --defects lockout-off-by-one   # the app now has a bug: expect FAIL
 ```
 
+Security checks: `npm run check:supply-chain` (known vulnerabilities and registry signatures, needs network), and `npm run ci` for a clean install plus all checks. The hardening log is in [docs/security-hardening.md](docs/security-hardening.md), and the runbooks are in [docs/runbooks/](docs/runbooks/).
+
 Exit codes: 0 for PASS, 1 for FAIL, 2 for BLOCKED, INCONCLUSIVE or INCOMPLETE, 64 for a usage error. Every run writes `runs/<run id>/run.json` and the evidence files (screenshots, page snapshots, network logs) that the runner captured. `runs/` is not committed.
 
 Fixture defects you can turn on with `--defects`: `lockout-off-by-one`, `email-check-missing`, `wrong-email-message`.

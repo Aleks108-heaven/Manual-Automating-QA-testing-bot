@@ -47,6 +47,7 @@ function printSummary(record: RunRecord, runDir: string, note: string | null): v
   line(`Run      ${record.run_id}`);
   line(`Target   ${record.target}  build ${record.versions.build ?? "unknown"}`);
   line(`Versions model client ${record.versions.model_client}, Playwright ${record.versions.playwright}, browser ${record.versions.browser}`);
+  if (!record.versions.browser_sandbox) line("WARNING  the browser sandbox was OFF for this run. Use that only inside an isolating container.");
   line();
   line(`Verdict: ${record.verdict}  (precedence row ${record.verdict_row})`);
   for (const o of record.outcomes) {
@@ -109,6 +110,11 @@ async function main(): Promise<number> {
   let targetOrigin: string;
   if (values.target) {
     targetOrigin = new URL(values.target).origin;
+    // A loopback address is not enough: another local service (an admin panel, a database UI) is not the fixture.
+    const health = await fetch(`${targetOrigin}/health`, { signal: AbortSignal.timeout(3000) }).then((r) => r.json() as Promise<{ build?: string }>, () => null);
+    if (!health || typeof health.build !== "string" || !health.build.startsWith("fixture-")) {
+      usage(`${targetOrigin} does not identify itself as the fixture site (GET /health must report a build starting with "fixture-").`);
+    }
     if (defects.length > 0) {
       const config = loadConfig();
       await fetch(`${targetOrigin}/__test/defects`, {

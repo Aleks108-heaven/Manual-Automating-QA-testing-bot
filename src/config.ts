@@ -16,6 +16,11 @@ const ConfigSchema = z.strictObject({
     actionTimeoutMs: z.number().int().min(100),
     navigationTimeoutMs: z.number().int().min(100),
   }),
+  browser: z.strictObject({
+    // Playwright turns the Chromium sandbox OFF unless it is asked to turn it on, so the bot asks.
+    // false is only for a container that already isolates the browser, and every run record says so.
+    sandbox: z.boolean(),
+  }),
   oracle: z.strictObject({
     assertionTimeoutMs: z.number().int().min(0),
     assertionPollMs: z.number().int().min(10),
@@ -37,6 +42,7 @@ export type Config = z.infer<typeof ConfigSchema>;
  *   QA_MAX_TOOL_CALLS_PER_RUN   integer
  *   QA_RUNS_DIR                 directory for run output
  *   QA_ASSERTION_TIMEOUT_MS     how long a check waits before it counts as a MISMATCH
+ *   QA_BROWSER_SANDBOX=off      turn the Chromium sandbox off (only inside an isolating container)
  */
 export function loadConfig(path = "config/default.json", env: NodeJS.ProcessEnv = process.env): Config {
   const config = ConfigSchema.parse(JSON.parse(readFileSync(path, "utf8")));
@@ -45,5 +51,6 @@ export function loadConfig(path = "config/default.json", env: NodeJS.ProcessEnv 
   if (env["QA_MAX_TOOL_CALLS_PER_RUN"]) config.budgets.maxToolCallsPerRun = Number(env["QA_MAX_TOOL_CALLS_PER_RUN"]);
   if (env["QA_RUNS_DIR"]) config.runs.directory = env["QA_RUNS_DIR"];
   if (env["QA_ASSERTION_TIMEOUT_MS"]) config.oracle.assertionTimeoutMs = Number(env["QA_ASSERTION_TIMEOUT_MS"]);
+  if (env["QA_BROWSER_SANDBOX"] === "off") config.browser.sandbox = false;
   return ConfigSchema.parse(config);
 }

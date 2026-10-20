@@ -1,0 +1,12 @@
+node_modules
+runs
+.git
+archive
+docs
+*.md
+.env
+.env.*
+secrets
+*.storage-state.json
+*.har
+*.trace.zip

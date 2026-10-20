@@ -13,6 +13,10 @@
     "typecheck": "tsc --noEmit",
     "check:pins": "node scripts/check-pins.ts",
     "check": "npm run typecheck && npm run check:pins && npm run test:ci",
+    "check:supply-chain": "node scripts/supply-chain.ts",
+    "ci": "npm ci && npm run check",
+    "outdated": "npm outdated",
+    "container:run": "powershell -NoProfile -File scripts/container-run.ps1",
     "run-case": "node src/cli.ts run",
     "fixture": "node fixtures/site/server.ts"
   },

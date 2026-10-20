@@ -26,6 +26,19 @@ describe("fixture site", () => {
     expect(await (await fetch(site.origin + "/health")).json()).toEqual({ status: "ok", build: "fixture-1" });
   });
 
+  it("refuses requests whose Host header is not its own loopback address (DNS rebinding)", async () => {
+    const http = await import("node:http");
+    const status = await new Promise<number>((resolve, reject) => {
+      const req = http.request({ host: "127.0.0.1", port: site.port, path: "/health", headers: { host: "attacker.example.com" } }, (res) => {
+        res.resume();
+        resolve(res.statusCode ?? 0);
+      });
+      req.on("error", reject);
+      req.end();
+    });
+    expect(status).toBe(421);
+  });
+
   it("keeps the test API behind a header", async () => {
     expect((await post("/__test/seed", { username: "x" })).status).toBe(403);
     expect((await post("/__test/seed", { username: "x" }, T)).status).toBe(200);

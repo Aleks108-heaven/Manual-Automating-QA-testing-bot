@@ -77,6 +77,53 @@ export function findFloatingInDockerfile(file: string, text: string): PinProblem
   return out;
 }
 
+const REGISTRY = "https://registry.npmjs.org/";
+
+/**
+ * Checks the contents of package-lock.json. A pull request that edits the lockfile by hand is a known
+ * way to slip in a package from another host or without an integrity hash.
+ * Every package must come from the npm registry and carry a sha512 integrity hash, and the root entry
+ * must agree with package.json.
+ */
+export function findLockfileProblems(file: string, lockText: string, packageJsonText?: string): PinProblem[] {
+  const out: PinProblem[] = [];
+  let lock: { lockfileVersion?: number; packages?: Record<string, Record<string, unknown>> };
+  try {
+    lock = JSON.parse(lockText);
+  } catch {
+    return [{ file, where: "lockfile", value: "unparseable", reason: "package-lock.json is not valid JSON" }];
+  }
+  if ((lock.lockfileVersion ?? 0) < 3) {
+    out.push({ file, where: "lockfileVersion", value: String(lock.lockfileVersion), reason: "lockfileVersion 3 or newer is required" });
+  }
+  for (const [name, entry] of Object.entries(lock.packages ?? {})) {
+    if (name === "") continue; // the root project
+    const label = name.replace(/^.*node_modules\//, "");
+    const resolved = entry["resolved"];
+    const integrity = entry["integrity"];
+    if (entry["link"]) {
+      out.push({ file, where: label, value: "link", reason: "linked or workspace packages are not allowed" });
+      continue;
+    }
+    if (typeof resolved !== "string" || !resolved.startsWith(REGISTRY)) {
+      out.push({ file, where: label, value: String(resolved), reason: `not resolved from ${REGISTRY}` });
+    }
+    if (typeof integrity !== "string" || !integrity.startsWith("sha512-")) {
+      out.push({ file, where: label, value: String(integrity), reason: "missing sha512 integrity hash" });
+    }
+  }
+  if (packageJsonText) {
+    const pkg = JSON.parse(packageJsonText) as Record<string, Record<string, string> | undefined>;
+    const root = (lock.packages?.[""] ?? {}) as Record<string, Record<string, string> | undefined>;
+    for (const section of ["dependencies", "devDependencies", "optionalDependencies"]) {
+      const want = JSON.stringify(Object.entries(pkg[section] ?? {}).sort());
+      const have = JSON.stringify(Object.entries(root[section] ?? {}).sort());
+      if (want !== have) out.push({ file, where: section, value: "differs", reason: "package-lock.json does not match package.json (run npm install, review the diff)" });
+    }
+  }
+  return out;
+}
+
 function walk(dir: string, found: string[]): void {
   for (const name of readdirSync(dir)) {
     if (name === "node_modules" || name === ".git" || name === "archive" || name === "runs") continue;
@@ -100,10 +147,21 @@ export function checkRepository(root: string): PinProblem[] {
   }
   if (!existsSync(join(root, "package-lock.json"))) {
     out.push({ file: "package-lock.json", where: "lockfile", value: "missing", reason: "a committed lockfile is required" });
+  } else {
+    const pkgPath = join(root, "package.json");
+    out.push(
+      ...findLockfileProblems(
+        "package-lock.json",
+        readFileSync(join(root, "package-lock.json"), "utf8"),
+        existsSync(pkgPath) ? readFileSync(pkgPath, "utf8") : undefined,
+      ),
+    );
   }
   const npmrc = existsSync(join(root, ".npmrc")) ? readFileSync(join(root, ".npmrc"), "utf8") : "";
-  if (!/^\s*save-exact\s*=\s*true\s*$/m.test(npmrc)) {
-    out.push({ file: ".npmrc", where: "save-exact", value: "missing", reason: "save-exact=true is required" });
+  for (const setting of ["save-exact", "ignore-scripts"]) {
+    if (!new RegExp(`^\\s*${setting}\\s*=\\s*true\\s*$`, "m").test(npmrc)) {
+      out.push({ file: ".npmrc", where: setting, value: "missing", reason: `${setting}=true is required` });
+    }
   }
   return out;
 }

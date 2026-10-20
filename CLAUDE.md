@@ -29,6 +29,8 @@ Open only the page you need. Do not read the whole manual every session.
 - Run a case: `npm run run-case -- cases/TC-FORM-001.yaml` (add `--negative-control` or `--defects <name>`)
 - Run the eval suite: not built yet (live-model scenarios start in M3 to M5)
 - Type check, pin check and CI tests together: `npm run check`
+- Supply chain (needs network): `npm run check:supply-chain`. Clean install plus check: `npm run ci`
+- Locked-down container run (verify first, see docs/runbooks/container-runner.md): `npm run container:run`
 
 ## Workflow
 

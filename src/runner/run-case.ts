@@ -171,6 +171,7 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
       node: process.version,
       playwright: readVersion("node_modules/playwright/package.json"),
       browser: access?.browserVersion ?? "not started",
+      browser_sandbox: access?.browserSandbox ?? config.browser.sandbox,
       model_client: model.name,
       prompt_hashes: Object.fromEntries(
         ["actor.v1.md", "judge.v1.md"].flatMap((f) => {

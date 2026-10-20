@@ -73,7 +73,15 @@ export async function startFixtureSite(options: FixtureOptions = {}): Promise<Fi
     return u;
   };
 
+  let listeningPort = 0;
+
   const handler = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    // Refuse any Host header that is not this server's own loopback address. This blocks DNS rebinding,
+    // where a web page the developer visits points its own domain at 127.0.0.1 to reach this server.
+    const host = String(req.headers.host ?? "").toLowerCase();
+    if (host !== `127.0.0.1:${listeningPort}` && host !== `localhost:${listeningPort}`) {
+      return send(res, 421, "Misdirected request", "text/plain");
+    }
     const url = new URL(req.url ?? "/", "http://fixture.local");
     const route = `${req.method} ${url.pathname}`;
 
@@ -285,6 +293,7 @@ export async function startFixtureSite(options: FixtureOptions = {}): Promise<Fi
     server.listen(options.port ?? 0, "127.0.0.1", resolve);
   });
   const port = (server.address() as AddressInfo).port;
+  listeningPort = port;
 
   return {
     origin: `http://127.0.0.1:${port}`,

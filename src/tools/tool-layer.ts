@@ -32,6 +32,7 @@ export interface RunnerAccess {
   /** Waits until no request is in flight and the network has been quiet for quietMs (or maxMs passes). */
   settle(quietMs: number, maxMs: number): Promise<void>;
   browserVersion: string;
+  browserSandbox: boolean;
   guardrails: GuardrailLog;
   targetOrigin: string;
 }
@@ -88,6 +89,8 @@ export class ToolLayer {
     // when only the route handler was active). The browser's host rule refuses every host that is not
     // on the allowlist, including IP literals, so redirect hops never leave the machine.
     const browser = await chromium.launch({
+      // Playwright adds --no-sandbox unless chromiumSandbox is true, so say it explicitly.
+      chromiumSandbox: options.config.browser.sandbox,
       args: options.disableHostResolverRules ? [] : [`--host-resolver-rules=${hostResolverRules(entries)}`],
     });
     const context = await browser.newContext({ acceptDownloads: false, serviceWorkers: "block" });
@@ -245,6 +248,7 @@ export class ToolLayer {
         }
       },
       browserVersion: this.browser.version(),
+      browserSandbox: this.options.config.browser.sandbox,
       guardrails: this.guardrails,
       targetOrigin: this.options.targetOrigin,
     };

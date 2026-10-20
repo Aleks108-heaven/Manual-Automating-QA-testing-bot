@@ -12,6 +12,9 @@
     "actionTimeoutMs": 3000,
     "navigationTimeoutMs": 10000
   },
+  "browser": {
+    "sandbox": true
+  },
   "oracle": {
     "assertionTimeoutMs": 5000,
     "assertionPollMs": 100,

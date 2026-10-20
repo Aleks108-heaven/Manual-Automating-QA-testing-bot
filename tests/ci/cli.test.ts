@@ -1,6 +1,8 @@
 // The command-line entry point: the same thin slice as T17, run the way a person runs it.
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -47,6 +49,28 @@ describe("CLI", () => {
     const r = cli(["cases/TC-FORM-001.yaml", "--target", "https://example.com"]);
     expect(r.code).toBe(64);
     expect(r.err).toContain("local fixture site");
+  });
+
+  it("refuses a loopback service that is not the fixture site", async () => {
+    const server = createServer((_req, res) => res.end("{}"));
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = (server.address() as AddressInfo).port;
+    try {
+      // spawnSync would block this process, and the server needs to answer, so run the CLI asynchronously.
+      const result = await new Promise<{ code: number | null; err: string }>((resolve) => {
+        const child = spawn(process.execPath, ["src/cli.ts", "run", "cases/TC-FORM-001.yaml", "--target", `http://127.0.0.1:${port}`], {
+          env: { ...process.env, QA_RUNS_DIR: mkdtempSync(join(tmpdir(), "qa-bot-cli-")) },
+        });
+        let err = "";
+        child.stderr.on("data", (d) => (err += String(d)));
+        child.on("close", (code) => resolve({ code, err }));
+      });
+      expect(result.code).toBe(64);
+      expect(result.err).toContain("does not identify itself as the fixture site");
+    } finally {
+      server.closeAllConnections();
+      server.close();
+    }
   });
 
   it("rejects an invalid case with exit code 64 before any run", () => {
