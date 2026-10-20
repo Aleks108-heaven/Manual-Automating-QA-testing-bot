@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { BudgetGuard, type BudgetStop } from "../agent/budget.ts";
 import { runAgentLoop, type LoopResult } from "../agent/loop.ts";
 import { requestFinalOutput } from "./final-output.ts";
+import type { JudgeClient } from "../judge/client.ts";
 import type { Config } from "../config.ts";
 import type { ModelClient } from "../model/client.ts";
 import { FileEvidenceSink } from "../oracle/evidence.ts";
@@ -45,6 +46,8 @@ export interface RunOptions {
   buildProbe?: BuildProbe;
   /** Where secrets come from. Defaults to environment variables. */
   secrets?: SecretStore;
+  /** Decides the judged expected results. Without one they get NO_EVIDENCE. */
+  judge?: JudgeClient;
 }
 
 export interface RunResult {
@@ -171,6 +174,8 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
         evidence: sink,
         redactor,
         guard,
+        runDir,
+        ...(options.judge ? { judge: options.judge } : {}),
         transcript: (entry) => appendFileSync(join(runDir, "model-context.jsonl"), `${JSON.stringify(entry)}\n`),
       });
 
@@ -237,7 +242,8 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
     runner_stop_reason: runnerStopOverride ?? loop?.runnerStop ?? finalBudgetStop?.reason ?? null,
     infrastructure_failure: infrastructureFailure,
     guardrail_block: loop?.guardrailBlock ?? false,
-    injection_suspected: output?.injection_suspected ?? false,
+    // Either the actor or the judge reported an attempt to influence it. It does not change the verdict.
+    injection_suspected: (output?.injection_suspected ?? false) || (loop?.judge.injection ?? 0) > 0,
   };
   const { verdict, row } = calculateVerdict({
     expectedCount: testCase.expected.length,
@@ -290,6 +296,14 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
       stop: loop?.budgetStop ?? finalBudgetStop ?? null,
     },
     blocked,
+    judge: {
+      configured: options.judge !== undefined,
+      name: options.judge?.name ?? null,
+      calls: loop?.judge.calls ?? 0,
+      attempts: loop?.judge.attempts ?? 0,
+      errors: loop?.judge.errors ?? [],
+      injection_reports: loop?.judge.injection ?? 0,
+    },
     model_output: modelOutput,
     redaction: { secrets_tracked: redactor.secretCount, replacements: redactor.replacements },
     artifact_scan: { files_scanned: scan.filesScanned, findings: scan.findings.length, cleaned: scan.findings.length > 0 },

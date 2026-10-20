@@ -142,7 +142,7 @@ export async function evaluateExpected(e: ExpectedResult, ctx: OracleContext): P
   let detail: string;
   if (result === null) {
     outcome = "NO_EVIDENCE";
-    detail = "a judged result needs the judge, which arrives in M3";
+    detail = "a judged result needs a judge, and none is configured for this run";
   } else if (evidence.length === 0) {
     // PASS needs evidence for every expected result (manual: Definitions). No evidence, no outcome.
     outcome = "NO_EVIDENCE";

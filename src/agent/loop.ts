@@ -4,10 +4,12 @@
 // and a run that loops is BLOCKED (manual: Definitions, precedence rows 4 and 5).
 import type { Config } from "../config.ts";
 import type { PriorAction, ModelClient } from "../model/client.ts";
+import type { JudgeClient, JudgeItem } from "../judge/client.ts";
+import { evidenceItems, judgedOutcome, judgeItems, type JudgedResult } from "../judge/judge.ts";
 import { evaluateExpected } from "../oracle/assertions.ts";
 import type { EvidenceSink } from "../oracle/evidence.ts";
-import type { Redactor } from "../redact/redactor.ts";
-import type { TestCase } from "../schemas/case.ts";
+import { Redactor } from "../redact/redactor.ts";
+import type { ExpectedResult, TestCase } from "../schemas/case.ts";
 import type { ActorStopReason, RunnerStopReason } from "../schemas/common.ts";
 import type { OutcomeRecord, StepRecord } from "../schemas/run-record.ts";
 import type { RunnerAccess, ToolLayer } from "../tools/tool-layer.ts";
@@ -23,6 +25,10 @@ export interface LoopOptions {
   /** Receives everything the model is shown and does, already scrubbed. The runner stores it. */
   transcript?: (entry: Record<string, unknown>) => void;
   redactor?: Redactor;
+  /** Where this run's evidence is stored. The judge reads its evidence from here. */
+  runDir: string;
+  /** Decides the judged expected results. Without one, they get NO_EVIDENCE. */
+  judge?: JudgeClient;
   /** The run's budget. The runner shares it with the final report and the judge, so they spend the same time and cost. */
   guard?: BudgetGuard;
   /** For tests: a clock the budget uses. */
@@ -40,6 +46,8 @@ export interface LoopResult {
   guardrailBlock: boolean;
   toolCalls: number;
   budget: BudgetSnapshot;
+  /** How the judge was used: batches asked, attempts made, rejected answers, results with an injection report. */
+  judge: { calls: number; attempts: number; errors: string[]; injection: number };
 }
 
 function stableJson(value: unknown): string {
@@ -58,6 +66,9 @@ export async function runAgentLoop(options: LoopOptions): Promise<LoopResult> {
   const note = (entry: Record<string, unknown>) => transcript?.(redactor ? redactor.scrubJson(entry) : entry);
   const guard = options.guard ?? new BudgetGuard(config.budgets, config.pricing, options.now);
   guard.start();
+  const judge = options.judge;
+  const scrub = redactor ?? new Redactor();
+  const judgeStats = { calls: 0, attempts: 0, errors: [] as string[], injection: 0 };
 
   const steps: StepRecord[] = [];
   const outcomes: OutcomeRecord[] = [];
@@ -162,11 +173,51 @@ export async function runAgentLoop(options: LoopOptions): Promise<LoopResult> {
 
     // The step is done. Wait for the network to go quiet, then check this step's expected results in code.
     await access.settle(config.oracle.settleQuietMs, config.oracle.settleMaxMs);
-    for (const expected of testCase.expected.filter((e) => e.after_step === index)) {
-      outcomes.push(await evaluateExpected(expected, { access, config, evidence }));
+    const stepExpected = testCase.expected.filter((e) => e.after_step === index);
+    const stepOutcomes: OutcomeRecord[] = [];
+    const judgedHere: ExpectedResult[] = [];
+    for (const expected of stepExpected) {
+      // Judged results go to the judge, if there is one. Everything else is checked in code.
+      if (expected.kind === "judged" && judge) judgedHere.push(expected);
+      else stepOutcomes.push(await evaluateExpected(expected, { access, config, evidence }));
     }
-    if (access.guardrails.blocked) break;
+
+    if (judgedHere.length > 0 && judge) {
+      const items: JudgeItem[] = [];
+      for (const expected of judgedHere) {
+        const refs = await evidence.capture(expected.id, expected.after_step);
+        items.push({ expected_ref: expected.id, description: expected.description, step: expected.after_step, evidence: evidenceItems(refs, options.runDir) });
+      }
+      const stepLog = steps.flatMap((s) =>
+        s.actions.map((a) => ({ step: s.index, tool: a.tool, args: scrub.scrubJson(a.args), ok: a.ok })),
+      );
+      const batch = await judgeItems({ judge, caseId: testCase.id, items, stepLog, consoleErrors: access.consoleErrors(), guard, config, redactor: scrub });
+      judgeStats.calls += 1;
+      judgeStats.attempts += batch.attempts;
+      judgeStats.errors.push(...batch.errors);
+      for (const item of items) {
+        const result = batch.results.get(item.expected_ref) as JudgedResult;
+        if (result.injection) judgeStats.injection += 1;
+        stepOutcomes.push(judgedOutcome(item, result));
+      }
+      if (batch.budgetStop) stopForBudget(batch.budgetStop, index);
+    }
+
+    const position = (ref: string) => testCase.expected.findIndex((e) => e.id === ref);
+    outcomes.push(...stepOutcomes.sort((a, b) => position(a.expected_ref) - position(b.expected_ref)));
+    if (budgetStop || access.guardrails.blocked) break;
   }
 
-  return { steps, outcomes, actorStop, stopSource, runnerStop, budgetStop, guardrailBlock: access.guardrails.blocked, toolCalls, budget: guard.snapshot() };
+  return {
+    steps,
+    outcomes,
+    actorStop,
+    stopSource,
+    runnerStop,
+    budgetStop,
+    guardrailBlock: access.guardrails.blocked,
+    toolCalls,
+    budget: guard.snapshot(),
+    judge: judgeStats,
+  };
 }

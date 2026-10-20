@@ -14,6 +14,9 @@
     "inputPerMTok": 3,
     "outputPerMTok": 15
   },
+  "judge": {
+    "maxAttempts": 3
+  },
   "modelOutput": {
     "maxAttempts": 3
   },

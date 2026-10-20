@@ -1,0 +1,8 @@
+{
+  "case_id": "TC-JUDGE-001",
+  "steps": [[{ "tool": "goto", "args": { "url": "/form" } }]],
+  "observations": [
+    { "expected_ref": "s1", "observed": "Newsletter signup", "evidence": [] },
+    { "expected_ref": "j1", "observed": "A form with an email field and a Subscribe button", "evidence": [] }
+  ]
+}

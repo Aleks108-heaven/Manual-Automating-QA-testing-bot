@@ -1,0 +1,21 @@
+id: TC-JUDGE-001
+title: Show a newsletter signup form
+priority: P2
+technique: use case
+risk: RISK-FORM   # fixture risk ID
+role: none
+preconditions:
+  - The newsletter form is available at /form
+steps:
+  - open /form   # 1
+expected:
+  - id: s1
+    after_step: 1
+    kind: text_visible
+    where: {role: heading}
+    text: "Newsletter signup"
+    description: The page heading is shown
+  - id: j1
+    after_step: 1
+    kind: judged
+    description: The page shows a newsletter sign-up form with an email field and a Subscribe button

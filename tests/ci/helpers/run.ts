@@ -2,6 +2,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig, type Config } from "../../../src/config.ts";
+import type { JudgeClient } from "../../../src/judge/client.ts";
 import type { FinalContext, ModelAction, ModelClient, ModelContext, ModelUsage } from "../../../src/model/client.ts";
 import { ScriptedModelClient, type Script } from "../../../src/model/scripted.ts";
 import { runCase, type BuildProbe, type RunResult } from "../../../src/runner/run-case.ts";
@@ -51,6 +52,7 @@ export async function runScripted(options: {
   secrets?: SecretStore;
   /** Use this model instead of building one from `script`. */
   model?: ModelClient;
+  judge?: JudgeClient;
 }): Promise<RunResult> {
   const model = options.model ?? (typeof options.script === "string" ? ScriptedModelClient.fromFile(options.script) : new ScriptedModelClient(options.script));
   return runCase({
@@ -61,5 +63,6 @@ export async function runScripted(options: {
     config: options.config ?? testConfig(),
     ...(options.buildProbe ? { buildProbe: options.buildProbe } : {}),
     ...(options.secrets ? { secrets: options.secrets } : {}),
+    ...(options.judge ? { judge: options.judge } : {}),
   });
 }

@@ -123,6 +123,15 @@ export const RunRecordSchema = z.strictObject({
       evidence: z.array(z.string()),
     })
     .nullable(),
+  // How the judge was used for the judged expected results. The judge sees only runner-captured evidence.
+  judge: z.strictObject({
+    configured: z.boolean(),
+    name: z.string().nullable(),
+    calls: z.number().int(),
+    attempts: z.number().int(),
+    errors: z.array(z.string()),
+    injection_reports: z.number().int(),
+  }),
   // How the model's final report fared: how many times it was requested, and why each rejected one was rejected.
   model_output: z.strictObject({ attempts: z.number().int(), valid: z.boolean(), errors: z.array(z.string()) }),
   // How much was scrubbed. Counts only, never values.
