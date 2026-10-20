@@ -6,6 +6,9 @@ import { runAgentLoop, type LoopResult } from "../agent/loop.ts";
 import type { Config } from "../config.ts";
 import type { ModelClient } from "../model/client.ts";
 import { FileEvidenceSink } from "../oracle/evidence.ts";
+import { Redactor } from "../redact/redactor.ts";
+import { EnvSecretStore, type SecretStore } from "../secrets/store.ts";
+import { establishSession, SessionError, type EstablishedSession } from "../sessions/session-setup.ts";
 import type { Call, TestCase } from "../schemas/case.ts";
 import { ActorOutputSchema, type ActorOutput } from "../schemas/actor.ts";
 import { RunRecordSchema, type RunRecord } from "../schemas/run-record.ts";
@@ -37,6 +40,8 @@ export interface RunOptions {
   model: ModelClient;
   config: Config;
   buildProbe?: BuildProbe;
+  /** Where secrets come from. Defaults to environment variables. */
+  secrets?: SecretStore;
 }
 
 export interface RunResult {
@@ -88,6 +93,8 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
   let tools: ToolLayer | null = null;
   let access: RunnerAccess | null = null;
   let sink: FileEvidenceSink | null = null;
+  let session: EstablishedSession | null = null;
+  const redactor = new Redactor();
 
   const before = await probe(targetOrigin);
   const fail = (message: string) => {
@@ -105,7 +112,24 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
     }
 
     if (infrastructureFailure === null) {
-      tools = await ToolLayer.create({ targetOrigin, config, runDir });
+      try {
+        session = await establishSession({
+          role: testCase.role,
+          config,
+          secrets: options.secrets ?? new EnvSecretStore(),
+          targetOrigin,
+          runId,
+          runDir,
+          redactor,
+        });
+      } catch (error) {
+        if (!(error instanceof SessionError)) throw error;
+        fail(`session setup failed: ${error.message}`);
+      }
+    }
+
+    if (infrastructureFailure === null && session) {
+      tools = await ToolLayer.create({ targetOrigin, config, runDir, ...(session.storageStatePath ? { storageStatePath: session.storageStatePath } : {}) });
       access = tools.runnerAccess();
       sink = new FileEvidenceSink(runDir, access);
       loop = await runAgentLoop({ testCase, model, tools, access, config, evidence: sink });
@@ -140,6 +164,7 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
       }
     }
     await tools?.close();
+    session?.cleanup();
   }
 
   const outcomes = loop?.outcomes ?? [];

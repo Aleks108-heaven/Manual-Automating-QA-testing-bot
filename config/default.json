@@ -22,6 +22,22 @@
     "settleQuietMs": 150,
     "settleMaxMs": 2000
   },
+  "roles": {
+    "member": {
+      "login": {
+        "path": "/api/login",
+        "usernameField": "username",
+        "passwordField": "password",
+        "username": "secret:fixture_member.username",
+        "password": "secret:fixture_member.password"
+      },
+      "verifyPath": "/account"
+    }
+  },
+  "sessions": {
+    "mode": "per-case",
+    "directory": "${TMPDIR}/qa-bot-sessions"
+  },
   "testApi": {
     "headers": { "x-fixture-test": "1" }
   },

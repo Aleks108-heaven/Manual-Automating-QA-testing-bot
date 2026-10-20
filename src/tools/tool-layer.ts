@@ -51,6 +51,8 @@ export interface ToolLayerOptions {
   guardrails?: GuardrailLog;
   /** Test-only: turn off the browser-level host resolver rule, so the route handler can be tested alone. */
   disableHostResolverRules?: boolean;
+  /** A Playwright storage state made by the session setup. The model never sees this path or its content. */
+  storageStatePath?: string;
 }
 
 function hostResolverRules(entries: readonly string[]): string {
@@ -99,7 +101,11 @@ export class ToolLayer {
       chromiumSandbox: options.config.browser.sandbox,
       args: options.disableHostResolverRules ? [] : [`--host-resolver-rules=${hostResolverRules(entries)}`],
     });
-    const context = await browser.newContext({ acceptDownloads: false, serviceWorkers: "block" });
+    const context = await browser.newContext({
+      acceptDownloads: false,
+      serviceWorkers: "block",
+      ...(options.storageStatePath ? { storageState: options.storageStatePath } : {}),
+    });
     context.setDefaultTimeout(options.config.tools.actionTimeoutMs);
     context.setDefaultNavigationTimeout(options.config.tools.navigationTimeoutMs);
     const page = await context.newPage();

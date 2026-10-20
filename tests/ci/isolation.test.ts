@@ -36,13 +36,14 @@ describe("product code isolation", () => {
     expect(files.filter((f) => pattern.test(f.text)).map((f) => f.path)).toEqual([]);
   });
 
-  it("never reads environment variables outside the config module and the runner's version stamps", () => {
-    const offenders = files.filter((f) => /process\.env\b/.test(f.text) && !["src/config.ts"].includes(f.path)).map((f) => f.path);
+  it("reads environment variables only in the config module and the environment secret store", () => {
+    const allowed = ["src/config.ts", "src/secrets/store.ts"];
+    const offenders = files.filter((f) => /process\.env\b/.test(f.text) && !allowed.includes(f.path)).map((f) => f.path);
     expect(offenders).toEqual([]);
   });
 
   it("does not write files outside the run directory helpers", () => {
     const writers = files.filter((f) => /writeFileSync|mkdirSync|appendFileSync|createWriteStream/.test(f.text)).map((f) => f.path).sort();
-    expect(writers).toEqual(["src/oracle/evidence.ts", "src/runner/run-case.ts", "src/tools/tool-layer.ts"]);
+    expect(writers).toEqual(["src/oracle/evidence.ts", "src/runner/run-case.ts", "src/sessions/session-setup.ts", "src/tools/tool-layer.ts"]);
   });
 });

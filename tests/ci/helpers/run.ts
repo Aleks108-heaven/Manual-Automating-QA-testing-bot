@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { loadConfig, type Config } from "../../../src/config.ts";
 import { ScriptedModelClient, type Script } from "../../../src/model/scripted.ts";
 import { runCase, type BuildProbe, type RunResult } from "../../../src/runner/run-case.ts";
+import type { SecretStore } from "../../../src/secrets/store.ts";
 import type { TestCase } from "../../../src/schemas/case.ts";
 import type { FixtureSite } from "../../../fixtures/site/server.ts";
 
@@ -22,6 +23,7 @@ export async function runScripted(options: {
   script: string | Script;
   config?: Config;
   buildProbe?: BuildProbe;
+  secrets?: SecretStore;
 }): Promise<RunResult> {
   const model = typeof options.script === "string" ? ScriptedModelClient.fromFile(options.script) : new ScriptedModelClient(options.script);
   return runCase({
@@ -31,5 +33,6 @@ export async function runScripted(options: {
     model,
     config: options.config ?? testConfig(),
     ...(options.buildProbe ? { buildProbe: options.buildProbe } : {}),
+    ...(options.secrets ? { secrets: options.secrets } : {}),
   });
 }

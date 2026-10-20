@@ -13,6 +13,8 @@ import { negativeControl } from "./cases/mutate.ts";
 import { loadConfig } from "./config.ts";
 import { ScriptedModelClient } from "./model/scripted.ts";
 import { runCase } from "./runner/run-case.ts";
+import { StaticSecretStore } from "./secrets/store.ts";
+import { FIXTURE_SECRETS } from "../fixtures/secrets.ts";
 import type { RunRecord } from "./schemas/run-record.ts";
 import { assertKnownDefects, startFixtureSite, type FixtureSite } from "../fixtures/site/server.ts";
 
@@ -141,6 +143,8 @@ async function main(): Promise<number> {
       targetOrigin,
       model: ScriptedModelClient.fromFile(scriptPath),
       config,
+      // In M1 and M2 the only valid target is the fixture site, whose credentials are fake.
+      secrets: new StaticSecretStore(FIXTURE_SECRETS),
     });
     printSummary(record, runDir, note);
     return record.verdict === "PASS" ? 0 : record.verdict === "FAIL" ? 1 : 2;
