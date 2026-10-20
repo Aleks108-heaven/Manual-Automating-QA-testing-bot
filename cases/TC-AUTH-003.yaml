@@ -1,0 +1,45 @@
+id: TC-AUTH-003
+title: Do not lock the account on the 4th failed login
+priority: P1
+technique: boundary value
+risk: RISK-LOCKOUT   # fixture risk ID
+role: none           # this case tests login itself
+preconditions:
+  - user lock_test_01 seeded with 3 failed attempts, via the test API
+setup:
+  - call: POST /__test/seed
+    body: {username: lock_test_01, failed_attempts: 3}
+    description: Seed the user with 3 failed attempts
+data:
+  wrong_password: "Wrong#Pass1"
+allowed_mutations:
+  - POST /api/login
+steps:
+  - open /login                                             # 1
+  - fill the Username field with lock_test_01               # 2
+  - fill the Password field with data.wrong_password        # 3
+  - click the Sign in button                                # 4
+expected:
+  - id: e1
+    after_step: 4
+    kind: text_visible
+    where: {role: alert}
+    text: "Invalid username or password"
+    description: The 4th failed attempt shows the normal failure message
+  - id: e2
+    after_step: 4
+    kind: count
+    where: {selector: "[data-testid=lock-banner]"}
+    equals: 0
+    description: No lockout banner is shown
+  - id: e3
+    after_step: 4
+    kind: status
+    request: "POST /api/login"
+    status: 401
+    description: The server answered with an ordinary failure, not a lockout
+cleanup:
+  - reset user lock_test_01 via the test API
+teardown:
+  - call: POST /__test/reset
+    description: Reset the fixture's users

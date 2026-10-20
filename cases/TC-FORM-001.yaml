@@ -1,0 +1,34 @@
+id: TC-FORM-001
+title: Reject an invalid email on the newsletter form
+priority: P1
+technique: equivalence partitioning
+risk: RISK-FORM-VALIDATION   # fixture risk ID
+role: none
+preconditions:
+  - The newsletter form is available at /form
+data:
+  invalid_email: "not-an-email"
+allowed_mutations:
+  - POST /api/subscribe
+steps:
+  - open /form                                              # 1
+  - fill the Email field with data.invalid_email            # 2
+  - click the Subscribe button                              # 3
+expected:
+  - id: e1
+    after_step: 3
+    kind: text_visible
+    where: {role: alert}
+    text: "Enter a valid email"
+    description: The validation message is shown
+  - id: e2
+    after_step: 3
+    kind: url
+    equals: /form
+    description: The page did not change
+  - id: e3
+    after_step: 3
+    kind: status
+    request: "POST /api/subscribe"
+    status: 422
+    description: The server rejected the submission
