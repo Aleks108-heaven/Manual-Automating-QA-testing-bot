@@ -75,12 +75,21 @@ function checkFor(e: ExpectedResult, ctx: OracleContext): (() => Promise<Check>)
     case "text_visible":
       return async () => {
         const locator = locatorFor(access.page(), e.where);
-        // Playwright compares text with white space collapsed, so a double space is not a difference a user could see.
-        const wanted = new RegExp(e.exact ? `^\\s*${escapeRegExp(e.text)}\\s*$` : escapeRegExp(e.text));
         const texts = (await locator.all()).length === 0 ? [] : await locator.allInnerTexts();
-        const visibleMatch = locator.filter({ hasText: wanted });
+        const actual = texts.length === 0 ? "(no matching element)" : clip(texts.map((t) => `"${t.trim()}"`).join(", "));
+        if (e.exact) {
+          // The whole text of the element, as a user sees it (white space collapsed), has to equal the text.
+          const collapse = (s: string) => s.replace(/\s+/g, " ").trim();
+          const wanted = collapse(e.text);
+          for (let i = 0; i < Math.min(texts.length, 20); i += 1) {
+            const element = locator.nth(i);
+            if (collapse(await element.innerText()) === wanted && (await element.isVisible())) return { ok: true, actual };
+          }
+          return { ok: false, actual };
+        }
+        const visibleMatch = locator.filter({ hasText: new RegExp(escapeRegExp(e.text)) });
         const found = (await visibleMatch.count()) > 0 && (await visibleMatch.first().isVisible());
-        return { ok: found, actual: texts.length === 0 ? "(no matching element)" : clip(texts.map((t) => `"${t.trim()}"`).join(", ")) };
+        return { ok: found, actual };
       };
     case "url":
       return async () => {

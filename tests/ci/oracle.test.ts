@@ -132,6 +132,33 @@ describe("T6 a wrong expected result fails", () => {
   });
 });
 
+describe("text_visible: contains, or exact", () => {
+  const script = "tests/ci/scripts/TC-FORM-001.json";
+  const withExact = (exact: boolean) => {
+    const testCase = loadCase("cases/TC-FORM-001.yaml");
+    const e1 = testCase.expected[0]!;
+    if (e1.kind !== "text_visible") throw new Error("test setup");
+    testCase.expected[0] = exact ? { ...e1, exact: true } : (({ exact: _x, ...rest }) => rest)(e1) as typeof e1;
+    return testCase;
+  };
+
+  it("contains (the default) misses a message with something added; exact catches it", async () => {
+    site.setDefects(["message=email-invalid:add-period"]);
+    const loose = await runScripted({ site, testCase: withExact(false), script });
+    expect(loose.record.outcomes.find((o) => o.expected_ref === "e1")?.outcome).toBe("MATCH"); // "Enter a valid email." contains the text
+    const strict = await runScripted({ site, testCase: withExact(true), script });
+    expect(strict.record.outcomes.find((o) => o.expected_ref === "e1")?.outcome).toBe("MISMATCH");
+    expect(strict.record.verdict).toBe("FAIL");
+    expect(strict.record.outcomes.find((o) => o.expected_ref === "e1")?.expected).toContain('shows exactly "Enter a valid email"');
+  });
+
+  it("exact passes the correct message, and ignores white space a browser would collapse", async () => {
+    expect((await runScripted({ site, testCase: withExact(true), script })).record.verdict).toBe("PASS");
+    site.setDefects(["message=email-invalid:double-space"]);
+    expect((await runScripted({ site, testCase: withExact(true), script })).record.verdict).toBe("PASS");
+  });
+});
+
 describe("T22 expected results are timed and evidence is the runner's", () => {
   const transientCase = () =>
     validateCase({
