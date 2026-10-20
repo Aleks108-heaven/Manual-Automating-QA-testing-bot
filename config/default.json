@@ -14,6 +14,10 @@
     "inputPerMTok": 3,
     "outputPerMTok": 15
   },
+  "mutations": {
+    "alwaysAllow": [],
+    "stateChangingGets": ["/logout", "/signout", "/sign-out", "/delete*", "/remove*"]
+  },
   "implicit": {
     "enabled": true,
     "accessibility": true,

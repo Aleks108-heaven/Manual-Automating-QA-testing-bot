@@ -116,7 +116,7 @@ describe("session setup", () => {
     const b = await establishSession(setup("member").options);
     try {
       expect(readFileSync(a.storageStatePath as string, "utf8")).not.toBe(readFileSync(b.storageStatePath as string, "utf8"));
-      const layer = await ToolLayer.create({ targetOrigin: site.origin, config: loadConfig(), runDir: mkdtempSync(join(tmpdir(), "qa-bot-view-")), storageStatePath: a.storageStatePath as string });
+      const layer = await ToolLayer.create({ targetOrigin: site.origin, config: loadConfig(), runDir: mkdtempSync(join(tmpdir(), "qa-bot-view-")), storageStatePath: a.storageStatePath as string, allowedMutations: ["GET /logout"] });
       await layer.call("goto", { url: "/logout" }); // a state-changing GET ends session a
       await layer.close();
       expect((await accountText(a.storageStatePath)).status).toBe("/login");

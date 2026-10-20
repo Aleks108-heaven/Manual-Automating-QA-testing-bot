@@ -35,6 +35,7 @@ async function newLayer(): Promise<{ layer: ToolLayer; redactor: Redactor }> {
     redactor,
     caseData: { api_key: "secret:fixture_apikey.value", note: "plain text", other: "secret:someone_else.password" },
     secretValues: { api_key: API_KEY },
+    allowedMutations: ["POST /api/apikey"],
   });
   return { layer, redactor };
 }

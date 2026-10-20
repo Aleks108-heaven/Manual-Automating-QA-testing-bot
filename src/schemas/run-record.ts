@@ -44,7 +44,7 @@ export type OutcomeRecord = z.infer<typeof OutcomeRecordSchema>;
 
 export const GuardrailEventSchema = z.strictObject({
   at: z.string(),
-  type: z.enum(["navigation", "request", "popup", "frame", "websocket", "scheme"]),
+  type: z.enum(["navigation", "request", "popup", "frame", "websocket", "scheme", "mutation"]),
   decision: z.enum(["allowed", "blocked"]),
   url: z.string(),
   detail: z.string(),

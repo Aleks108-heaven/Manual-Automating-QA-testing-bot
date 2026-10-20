@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { z } from "zod";
+import { isValidDeclaration } from "./tools/mutations.ts";
 
 // Every value the manual marks [to fill] is read from here, never hard-coded elsewhere.
 const ConfigSchema = z.strictObject({
@@ -19,6 +20,13 @@ const ConfigSchema = z.strictObject({
   }),
   // Price per million tokens. Fixture placeholders: the real values depend on the provider, which is still [to fill].
   pricing: z.strictObject({ inputPerMTok: z.number().min(0), outputPerMTok: z.number().min(0) }),
+  // Requests that change state are blocked unless the case declares them (manual: Guardrails, "Risky actions").
+  mutations: z.strictObject({
+    // Always allowed. Supplied by the staging owner, for example a telemetry endpoint the application calls on its own.
+    alwaysAllow: z.array(z.string().refine(isValidDeclaration, 'use "METHOD /path", "POST /path#Operation" or "WS /path"')),
+    // GET paths that change state (for example /logout). Exact, or a prefix when the path ends with *.
+    stateChangingGets: z.array(z.string().regex(/^\/\S*$/)),
+  }),
   // Implicit checks need no expected result. In version 1 they are reported with the verdict and never change it.
   implicit: z.strictObject({
     enabled: z.boolean(),

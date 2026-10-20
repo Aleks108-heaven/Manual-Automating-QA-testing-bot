@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isValidDeclaration } from "../tools/mutations.ts";
 import { WhereSchema } from "./common.ts";
 
 // The case template is defined on the manual's page "Writing bot-ready test cases"
@@ -85,7 +86,7 @@ export const CaseSchema = z.strictObject({
   setup: z.array(CallSchema).default([]),
   teardown: z.array(CallSchema).default([]),
   data: z.record(z.string(), z.string()).default({}),
-  allowed_mutations: z.array(z.string().min(1)).default([]),
+  allowed_mutations: z.array(z.string().refine(isValidDeclaration, 'use "METHOD /path", "POST /path#Operation" or "WS /path"')).default([]),
   steps: z.array(z.string().min(1)).min(1, "a case needs at least one step"),
   expected: z.array(ExpectedResultSchema).min(1, "a case needs at least one expected result"),
   automation_notes: z.string().optional(),

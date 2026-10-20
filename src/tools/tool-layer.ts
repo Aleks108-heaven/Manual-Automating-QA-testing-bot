@@ -11,6 +11,7 @@ import type { GuardrailEvent } from "../schemas/run-record.ts";
 import { Allowlist } from "./allowlist.ts";
 import { GuardrailLog } from "./guardrail-log.ts";
 import { locatorFor } from "./locate.ts";
+import { buildPolicy, checkRequest, checkWebSocketSend, nextRequestAfterRedirect, type MutationPolicy, type RequestFacts } from "./mutations.ts";
 import { TOOL_SCHEMAS, type ToolName, type ToolResult } from "./schemas.ts";
 
 export interface NetworkEntry {
@@ -67,6 +68,11 @@ export interface ToolLayerOptions {
   /** Where the scrubbed HAR is written, and a private folder (outside the run directory) for the raw one. */
   harPath?: string;
   harScratchDir?: string;
+  /**
+   * The state-changing requests the case declares ("POST /api/x", "POST /graphql#Op", "WS /socket"). Anything that
+   * changes state and is not declared here, or always allowed by the configuration, is blocked.
+   */
+  allowedMutations?: readonly string[];
 }
 
 /** Deep-scrubs a tool result. Strings under a `url` key are scrubbed as URLs. */
@@ -85,6 +91,7 @@ function hostResolverRules(entries: readonly string[]): string {
 export class ToolLayer {
   readonly guardrails: GuardrailLog;
   readonly redactor: Redactor;
+  private readonly policy: MutationPolicy;
   private readonly secretFields: Where[] = [];
   private rawHarPath: string | null = null;
   private readonly allowlist: Allowlist;
@@ -110,6 +117,7 @@ export class ToolLayer {
     this.allowlist = allowlist;
     this.entries = entries;
     this.redactor = options.redactor ?? new Redactor();
+    this.policy = buildPolicy(options.allowedMutations ?? [], options.config.mutations.alwaysAllow, options.config.mutations.stateChangingGets);
     this.guardrails = options.guardrails ?? new GuardrailLog((u) => this.redactor.scrubUrl(u), (t) => this.redactor.scrubText(t));
   }
 
@@ -173,30 +181,65 @@ export class ToolLayer {
       }
       const type: GuardrailEvent["type"] = request.isNavigationRequest() ? (isFrame ? "frame" : "navigation") : "request";
       const hop = request.redirectedFrom() ? " (redirect hop)" : "";
-      if (decision.allowed) {
-        if (type !== "request") this.log(type, "allowed", url, decision.reason + hop);
-        await route.continue();
-      } else {
+      if (!decision.allowed) {
         this.log(type, "blocked", url, decision.reason + hop);
         await route.abort("blockedbyclient");
+        return;
       }
+
+      // A request that changes state must be declared by the case (or always allowed by the staging owner).
+      const facts = { method: request.method(), url, postData: request.postData() };
+      const mutation = checkRequest(facts, this.policy);
+      if (!mutation.allowed) {
+        this.log("mutation", "blocked", url, `${mutation.undeclared.join(", ")} is not declared in allowed_mutations${hop}`);
+        await route.abort("blockedbyclient");
+        return;
+      }
+      if (mutation.changesState) {
+        await this.forwardStateChange(route, facts, type, decision.reason + hop);
+        return;
+      }
+      if (type !== "request") this.log(type, "allowed", url, decision.reason + hop);
+      await route.continue();
     });
 
     await context.routeWebSocket(/.*/, (ws) => {
       const url = ws.url();
       const decision = this.allowlist.check(url.replace(/^ws/, "http"));
-      if (decision.allowed) {
-        this.log("websocket", "allowed", url, decision.reason);
-        ws.connectToServer();
-      } else {
+      if (!decision.allowed) {
         this.log("websocket", "blocked", url, decision.reason);
         void ws.close({ code: 1008, reason: "blocked by allowlist" });
+        return;
       }
+      this.log("websocket", "allowed", url, decision.reason);
+      const server = ws.connectToServer();
+      // Messages sent by the page are state changes. They are forwarded only if the case declares "WS <path>".
+      // Messages from the server to the page pass through untouched.
+      ws.onMessage((message) => {
+        const check = checkWebSocketSend(url, this.policy);
+        if (!check.allowed) {
+          this.log("mutation", "blocked", url, `${check.undeclared.join(", ")} is not declared in allowed_mutations (a message sent by the page)`);
+          void ws.close({ code: 1008, reason: "blocked: undeclared state change" });
+          void server.close();
+          return;
+        }
+        server.send(message);
+      });
+      ws.onClose((code, reason) => void server.close({ ...(code !== undefined ? { code } : {}), ...(reason !== undefined ? { reason } : {}) }));
     });
 
-    context.on("request", () => {
+    context.on("request", (request) => {
       this.inFlight += 1;
       this.lastNetworkActivity = Date.now();
+      // Backstop. The route handler does not see redirect hops (M1 finding). State-changing requests are followed by
+      // hand (forwardStateChange), so this only fires for a chain longer than one hop. It cannot stop the request,
+      // but the run still ends as INCONCLUSIVE with the request named.
+      if (request.redirectedFrom()) {
+        const check = checkRequest({ method: request.method(), url: request.url(), postData: request.postData() }, this.policy);
+        if (!check.allowed) {
+          this.log("mutation", "blocked", request.url(), `${check.undeclared.join(", ")} is not declared in allowed_mutations (redirect hop, noticed after it was sent)`);
+        }
+      }
     });
     context.on("requestfinished", () => {
       this.inFlight = Math.max(0, this.inFlight - 1);
@@ -233,6 +276,38 @@ export class ToolLayer {
       void this.handlePopup(popup);
     });
     this.attach(this.current);
+  }
+
+  /**
+   * Sends a state-changing request that is allowed, but follows its first redirect by hand. A redirect with status
+   * 307 or 308 keeps the method, so a declared POST could otherwise be moved to a path nobody declared. The
+   * browser never sees the redirect hop in the route handler, so the check has to happen here.
+   */
+  private async forwardStateChange(route: Route, facts: RequestFacts, type: GuardrailEvent["type"], reason: string): Promise<void> {
+    let response;
+    try {
+      response = await route.fetch({ maxRedirects: 0 });
+    } catch {
+      await route.abort("failed");
+      return;
+    }
+    const next = nextRequestAfterRedirect(facts, response.status(), response.headers()["location"] ?? "");
+    if (next) {
+      const where = this.allowlist.check(next.url);
+      if (!where.allowed) {
+        this.log(type === "request" ? "request" : "navigation", "blocked", next.url, `${where.reason} (redirect hop of a state-changing request)`);
+        await route.abort("blockedbyclient");
+        return;
+      }
+      const check = checkRequest(next, this.policy);
+      if (!check.allowed) {
+        this.log("mutation", "blocked", next.url, `${check.undeclared.join(", ")} is not declared in allowed_mutations (redirect hop)`);
+        await route.abort("blockedbyclient");
+        return;
+      }
+    }
+    if (type !== "request") this.log(type, "allowed", facts.url, reason);
+    await route.fulfill({ response });
   }
 
   private entryFor(method: string, url: string, status: number | null, resourceType: string, failure: string | null): NetworkEntry {

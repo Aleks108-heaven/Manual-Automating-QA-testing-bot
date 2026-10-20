@@ -27,7 +27,7 @@ async function newLayer(): Promise<ToolLayer> {
   const config = loadConfig();
   config.tools.actionTimeoutMs = 600;
   runDir = mkdtempSync(join(tmpdir(), "qa-bot-tools-"));
-  layer = await ToolLayer.create({ targetOrigin: site.origin, config, runDir });
+  layer = await ToolLayer.create({ targetOrigin: site.origin, config, runDir, allowedMutations: ["POST /api/subscribe"] });
   return layer;
 }
 

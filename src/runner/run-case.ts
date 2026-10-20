@@ -161,6 +161,7 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
         redactor,
         caseData: testCase.data,
         secretValues,
+        allowedMutations: testCase.allowed_mutations,
         harPath: join(runDir, "network.har"),
         harScratchDir,
         ...(session.storageStatePath ? { storageStatePath: session.storageStatePath } : {}),

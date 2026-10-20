@@ -1,6 +1,6 @@
 // The local fixture site. It is the only target the bot may run against until M5 passes and the
 // security review is done. Plain Node http, bound to 127.0.0.1. No real credentials or data.
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { FIXTURE_SECRETS } from "../secrets.ts";
@@ -86,6 +86,8 @@ export async function startFixtureSite(options: FixtureOptions = {}): Promise<Fi
   let defects = new Set<string>(options.defects ?? []);
   const users = new Map<string, User>();
   const sessions = new Map<string, string>(); // session token -> username
+  // Every request that changes state and reached this server. A blocked request must never appear here.
+  const hits: string[] = [];
 
   const sessionUser = (req: IncomingMessage): string | null => {
     const token = cookieFrom(req, SESSION_COOKIE);
@@ -124,9 +126,11 @@ export async function startFixtureSite(options: FixtureOptions = {}): Promise<Fi
         u.locked = false;
         return json(res, 200, { ok: true });
       }
+      if (route === "GET /__test/hits") return json(res, 200, { hits: [...hits] });
       if (route === "POST /__test/reset") {
         users.clear();
         sessions.clear();
+        hits.length = 0;
         return json(res, 200, { ok: true });
       }
       if (route === "GET /__test/sessions") {
@@ -146,7 +150,85 @@ export async function startFixtureSite(options: FixtureOptions = {}): Promise<Fi
       return json(res, 404, { error: "unknown test endpoint" });
     }
 
+    if (!["GET", "HEAD", "OPTIONS"].includes(req.method ?? "GET") || route === "GET /logout") hits.push(route);
+
     switch (route) {
+      case "GET /mutations":
+        return send(
+          res,
+          200,
+          page(
+            "Mutations",
+            `<button id="post" type="button">Send POST</button>
+<button id="put" type="button">Send PUT</button>
+<button id="patch" type="button">Send PATCH</button>
+<button id="delete" type="button">Send DELETE</button>
+<form method="post" action="/api/form-post"><button type="submit">Submit form</button></form>
+<button id="gql-query" type="button">GraphQL query</button>
+<button id="gql-create" type="button">GraphQL mutation CreateOrder</button>
+<button id="gql-delete" type="button">GraphQL mutation DeleteOrder</button>
+<button id="ws" type="button">Open socket and send</button>
+<a id="logout-link" href="/logout">Log out link</a>
+<button id="beacon" type="button">Send beacon</button>
+<button id="redirect" type="button">POST that redirects</button>
+<button id="chain" type="button">POST chain of redirects</button>
+<button id="telemetry" type="button">Send telemetry</button>
+<p id="out" role="status">ready</p>`,
+            `const out = document.getElementById('out');
+const send = async (method, path, body) => {
+  try { const r = await fetch(path, {method, headers: {'content-type':'application/json'}, body: body === undefined ? undefined : JSON.stringify(body)}); out.textContent = method + ' ' + path + ' ' + r.status; }
+  catch (e) { out.textContent = method + ' ' + path + ' failed'; }
+};
+document.getElementById('post').onclick = () => send('POST', '/api/m1', {a: 1});
+document.getElementById('put').onclick = () => send('PUT', '/api/m1', {a: 1});
+document.getElementById('patch').onclick = () => send('PATCH', '/api/m1', {a: 1});
+document.getElementById('delete').onclick = () => send('DELETE', '/api/m1');
+document.getElementById('gql-query').onclick = () => send('POST', '/graphql', {query: 'query Orders { orders { id } }', operationName: 'Orders'});
+document.getElementById('gql-create').onclick = () => send('POST', '/graphql', {query: 'mutation CreateOrder { createOrder { id } }', operationName: 'CreateOrder'});
+document.getElementById('gql-delete').onclick = () => send('POST', '/graphql', {query: 'mutation DeleteOrder { deleteOrder { id } }', operationName: 'DeleteOrder'});
+document.getElementById('beacon').onclick = () => { navigator.sendBeacon('/api/beacon', 'ping'); out.textContent = 'beacon sent'; };
+document.getElementById('redirect').onclick = () => send('POST', '/api/redirect-post', {a: 1});
+document.getElementById('chain').onclick = () => send('POST', '/api/redirect-chain', {a: 1});
+document.getElementById('telemetry').onclick = () => send('POST', '/api/telemetry', {event: 'click'});
+document.getElementById('ws').onclick = () => {
+  const ws = new WebSocket('ws://' + location.host + '/socket');
+  ws.onopen = () => ws.send('hello');
+  ws.onmessage = (m) => { out.textContent = 'socket echo ' + m.data; };
+  ws.onclose = () => { if (!out.textContent.startsWith('socket echo')) out.textContent = 'socket closed'; };
+};`,
+          ),
+        );
+
+      case "POST /api/m1":
+      case "PUT /api/m1":
+      case "PATCH /api/m1":
+      case "DELETE /api/m1":
+      case "POST /api/other":
+        await readJson(req);
+        return json(res, 200, { ok: true });
+
+      case "POST /api/telemetry":
+      case "POST /api/beacon":
+        await readJson(req);
+        return send(res, 204, "", "text/plain");
+
+      case "POST /api/form-post":
+        await readJson(req);
+        return send(res, 200, page("Form posted", "<p>The form was posted.</p>"));
+
+      case "POST /api/redirect-post":
+        await readJson(req);
+        return send(res, 307, "", "text/plain", { location: "/api/other" });
+
+      case "POST /api/redirect-chain":
+        await readJson(req);
+        return send(res, 307, "", "text/plain", { location: "/api/redirect-post" });
+
+      case "POST /graphql": {
+        const body = await readJson(req);
+        return json(res, 200, { data: { ok: true, operation: body["operationName"] ?? null } });
+      }
+
       case "GET /health":
         return json(res, 200, { status: "ok", build: BUILD });
 
@@ -406,6 +488,34 @@ export async function startFixtureSite(options: FixtureOptions = {}): Promise<Fi
       if (!res.headersSent) json(res, 500, { error: String(error) });
       else res.end();
     });
+  });
+
+  // A small websocket echo at /socket, written by hand so the fixture needs no extra package. It reads one
+  // small, unfragmented, masked text frame at a time, which is all the tests send.
+  server.on("upgrade", (req, socket) => {
+    const host = String(req.headers.host ?? "").toLowerCase();
+    const path = new URL(req.url ?? "/", "http://fixture.local").pathname;
+    const key = req.headers["sec-websocket-key"];
+    if ((host !== `127.0.0.1:${listeningPort}` && host !== `localhost:${listeningPort}`) || path !== "/socket" || typeof key !== "string") {
+      socket.destroy();
+      return;
+    }
+    const accept = createHash("sha1").update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest("base64");
+    socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
+    socket.on("data", (buffer: Buffer) => {
+      const opcode = (buffer[0] ?? 0) & 0x0f;
+      if (opcode === 8) {
+        socket.end();
+        return;
+      }
+      const length = (buffer[1] ?? 0) & 0x7f;
+      if (length >= 126) return;
+      const mask = buffer.subarray(2, 6);
+      const payload = Buffer.from(buffer.subarray(6, 6 + length).map((byte, i) => byte ^ (mask[i % 4] as number)));
+      hits.push("WS /socket message");
+      socket.write(Buffer.concat([Buffer.from([0x81, payload.length]), payload]));
+    });
+    socket.on("error", () => undefined);
   });
 
   await new Promise<void>((resolve, reject) => {
