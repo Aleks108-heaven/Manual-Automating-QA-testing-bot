@@ -1,0 +1,32 @@
+## Running tests
+
+Run scripted cases on demand, on release candidates, and on a schedule, and use exploratory mode only with a charter and a time-box.
+
+**Triggers**
+
+| Trigger | Scope | Notes |
+| --- | --- | --- |
+| On demand | Selected cases | For case authors and triagers |
+| Release candidate | All P1 cases on the candidate build | Required before go or no-go once the bot is gating |
+| Scheduled ([to fill: nightly or weekly]) | Smoke subset, plus the golden set weekly | Needs a named triage owner on duty |
+| Pull request | Smoke subset | Only at the gating stage, once the bot is trusted |
+
+**Configurations.** Pilot runs use one default configuration: [to fill: browser, viewport, locale, role]. Add one dimension at a time once accuracy is established, so a failure stays attributable. Every report records the build, model, prompt, tool, and browser versions.
+
+**Run rules**
+
+- Each case runs in a fresh browser context with its own seeded data and its role's stored session.
+- The pre-flight check must pass first: the provider is reachable, quota is left, secrets are valid, each role's stored session is fresh, the runner image matches the pinned one, staging is healthy, the build is the expected one, and the canary cases pass. Otherwise the run does not start.
+- Every run has budgets for steps, time, and cost: [to fill: limits]. A run cut off by a budget is INCOMPLETE, never PASS.
+- During the pilot each case runs three times, to measure repeatability.
+- Do not run performance tests on staging while bot runs share it.
+
+**Exploratory mode.** The bot explores only against a charter, inside a time-box, in read-only mode unless the charter says otherwise. It reports suspected defects with evidence and reproduction steps, and a human sets severity and priority.
+
+| Charter field | What to write |
+| --- | --- |
+| Mission | Explore [area] with [data or role] to discover [information] |
+| Time-box | [to fill: minutes] and a step budget |
+| Heuristics | Boundary values, special characters and unicode, empty and very long input, double submit, back, forward and refresh mid-flow, session expiry, viewport change |
+| Allowed actions | Read-only, or the data-creating actions listed here; never delete, send, pay, upload, or download unless named |
+| Output | Suspected defects, each with evidence and steps to reproduce |

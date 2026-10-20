@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+.env.*
+secrets/
+*.storage-state.json
+artifacts/
+runs/
+*.har
+*.trace.zip

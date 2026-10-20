@@ -1,0 +1,62 @@
+## Reading results and triage
+
+Every FAIL, BLOCKED, INCONCLUSIVE, and INCOMPLETE result goes to a person, and only a PASS with evidence counts as verified.
+
+**Report anatomy**
+
+- Header: the build, the configuration, and the model, prompt, tool, and browser versions.
+- Summary line in this form: "bot executed X of Y planned cases, Z not verified". Never write "all tests passed".
+- Per case: verdict, rationale, step list with screenshots, console and network errors, and a trace or video link.
+- For a FAIL: expected vs actual, and a draft bug report.
+
+**Triage.** Work through the decision tree below, in order, for every FAIL.
+
+```mermaid
+flowchart TD
+    start(["A FAIL arrives"]) --> q1{"Did the bot perform<br/>the intended steps?"}
+    q1 -->|no| c1["Tool or agent error<br/>Maintainer fixes tool or prompt"]
+    q1 -->|yes| q2{"Is the expected result<br/>clear and still correct?"}
+    q2 -->|no| c2["Case issue or requirement change<br/>Curator rewrites the case"]
+    q2 -->|yes| q3{"Are the environment<br/>and the build correct?"}
+    q3 -->|no| c3["Environment<br/>Staging owner fixes it, then rerun"]
+    q3 -->|yes| q4{"Does it reproduce manually<br/>from the steps?"}
+    q4 -->|no| c4["Flaky or unexplained<br/>Rerun, approver may quarantine"]
+    q4 -->|yes| c5["App defect<br/>File the bug from the draft"]
+```
+
+Start at the top: a no answer exits to its cause, and a yes carries you down to the next question.
+
+In words: if the bot did not perform the intended steps, it is a tool or agent error. Otherwise, if the expected result is unclear or outdated, it is a case issue or a requirement change. Otherwise, if the environment or build is wrong, it is an environment problem. Otherwise, if the failure does not reproduce manually, it is flaky or unexplained, and if it does, it is an app defect.
+
+**Cause categories**
+
+| Category | Meaning | Action |
+| --- | --- | --- |
+| Tool or agent error | The bot did not perform the intended steps | Maintainer fixes the tool or prompt and adds a golden-set case |
+| Case issue | The expected result is ambiguous, outdated, or wrong | Case curator rewrites it and links the requirement |
+| Environment | Staging is unhealthy, the build is wrong, or data collided | Staging owner fixes it, the run is rerun, and meanwhile it is INCONCLUSIVE |
+| App defect | It reproduces manually from the steps | File the bug from the draft; a human sets severity and priority |
+| Requirement change | The app changed on purpose | Update the case after the product owner confirms |
+
+Record the category on every triaged FAIL. The tags become labeled data for the eval set.
+
+A FAIL that does not reproduce manually is recorded as flaky or unexplained. Rerun it, and the approver may quarantine it.
+
+**Bug report fields**
+
+- Title, build, and configuration.
+- Preconditions and steps to reproduce.
+- Expected vs actual, with evidence links.
+- Cause category.
+- Bot-suggested severity (a draft only), then the severity and priority set by a human.
+
+Scrub evidence before attaching it to a ticket, because traces and HAR files can hold cookies, auth headers, and request bodies.
+
+**Rules**
+
+- Triage target: [to fill; suggested: within one business day].
+- A P1 case that is not PASS gets human execution before release (Definitions). A guardrail block (INCONCLUSIVE) is also reviewed by the security reviewer.
+- Only the approver may quarantine a case, with a named owner and a deadline. Quarantined cases are listed in every release report.
+- Overriding a FAIL needs a recorded triage result and the approver. Overrides are reviewed monthly.
+
+**Challenging a verdict.** Anyone may challenge a verdict through [to fill: form or channel] and gets a response within [to fill: target]. The outcome is recorded, and every accepted challenge becomes an eval example.
