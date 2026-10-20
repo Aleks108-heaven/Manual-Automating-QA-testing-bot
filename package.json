@@ -1,0 +1,28 @@
+{
+  "name": "qa-automation-bot",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "A bot that executes written test cases in a browser and reports verdicts with evidence.",
+  "engines": {
+    "node": ">=24.2.0"
+  },
+  "scripts": {
+    "test:ci": "vitest run --config vitest.config.ts",
+    "test:one": "vitest run --config vitest.config.ts",
+    "typecheck": "tsc --noEmit",
+    "check:pins": "node scripts/check-pins.ts",
+    "check": "npm run typecheck && npm run check:pins && npm run test:ci",
+    "run-case": "node src/cli.ts"
+  },
+  "dependencies": {
+    "playwright": "1.63.0",
+    "yaml": "2.9.1",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.1",
+    "typescript": "6.0.3",
+    "vitest": "5.0.3"
+  }
+}

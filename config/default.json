@@ -1,0 +1,18 @@
+{
+  "_comment": "Fixture-only defaults for M1. Every value here corresponds to a [to fill] in the manual and must be reviewed before the pilot. Environment variables override these values.",
+  "allowlist": {
+    "hosts": ["127.0.0.1"],
+    "schemes": ["http:", "https:"]
+  },
+  "budgets": {
+    "maxToolCallsPerRun": 60,
+    "maxToolCallsPerStep": 8
+  },
+  "oracle": {
+    "assertionTimeoutMs": 5000,
+    "assertionPollMs": 100
+  },
+  "runs": {
+    "directory": "runs"
+  }
+}
