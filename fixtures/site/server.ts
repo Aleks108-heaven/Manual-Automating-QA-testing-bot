@@ -6,6 +6,12 @@ import type { AddressInfo } from "node:net";
 export const DEFECTS = ["lockout-off-by-one", "email-check-missing", "wrong-email-message"] as const;
 export type DefectName = (typeof DEFECTS)[number];
 
+/** Throws on a defect name that does not exist, so a typo cannot silently run the case on a correct app. */
+export function assertKnownDefects(names: readonly string[]): void {
+  const unknown = names.filter((n) => !(DEFECTS as readonly string[]).includes(n));
+  if (unknown.length > 0) throw new Error(`Unknown fixture defect(s): ${unknown.join(", ")}. Known defects: ${DEFECTS.join(", ")}.`);
+}
+
 export interface FixtureOptions {
   /** An origin the bot must NOT reach. The trap pages point at it. */
   outsideOrigin?: string;
@@ -61,6 +67,7 @@ async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> 
 
 export async function startFixtureSite(options: FixtureOptions = {}): Promise<FixtureSite> {
   const outside = options.outsideOrigin ?? "http://localhost:9";
+  assertKnownDefects(options.defects ?? []);
   let defects = new Set<string>(options.defects ?? []);
   const users = new Map<string, User>();
 
@@ -101,7 +108,13 @@ export async function startFixtureSite(options: FixtureOptions = {}): Promise<Fi
         return json(res, 200, { ok: true });
       }
       if (route === "POST /__test/defects") {
-        defects = new Set(Array.isArray(body["defects"]) ? (body["defects"] as string[]) : []);
+        const names = Array.isArray(body["defects"]) ? (body["defects"] as string[]) : [];
+        try {
+          assertKnownDefects(names);
+        } catch (error) {
+          return json(res, 400, { error: (error as Error).message });
+        }
+        defects = new Set(names);
         return json(res, 200, { defects: [...defects] });
       }
       return json(res, 404, { error: "unknown test endpoint" });
@@ -299,6 +312,7 @@ export async function startFixtureSite(options: FixtureOptions = {}): Promise<Fi
     origin: `http://127.0.0.1:${port}`,
     port,
     setDefects(next) {
+      assertKnownDefects(next);
       defects = new Set(next);
     },
     close() {

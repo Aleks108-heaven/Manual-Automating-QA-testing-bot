@@ -28,6 +28,8 @@ export interface RunnerAccess {
   page(): Page;
   network(): readonly NetworkEntry[];
   consoleErrors(): readonly string[];
+  /** Requests to allowed hosts that got no answer at all (refused, reset, timed out, unresolvable). */
+  infrastructureFailures(): readonly string[];
   setStep(step: number): void;
   /** Waits until no request is in flight and the network has been quiet for quietMs (or maxMs passes). */
   settle(quietMs: number, maxMs: number): Promise<void>;
@@ -38,6 +40,9 @@ export interface RunnerAccess {
 }
 
 class GuardrailBlock extends Error {}
+
+// Errors that mean "nobody answered", as opposed to an HTTP error response from the application.
+const CONNECTION_FAILURE = /ERR_CONNECTION_(REFUSED|RESET|TIMED_OUT|CLOSED)|ERR_NAME_NOT_RESOLVED|ERR_INTERNET_DISCONNECTED|ERR_ADDRESS_UNREACHABLE|ERR_EMPTY_RESPONSE|ERR_NETWORK_CHANGED/;
 
 export interface ToolLayerOptions {
   targetOrigin: string;
@@ -59,6 +64,7 @@ export class ToolLayer {
   private readonly entries: string[];
   private readonly network: NetworkEntry[] = [];
   private readonly consoleLog: string[] = [];
+  private readonly connectionFailures: string[] = [];
   private current: Page;
   private step = 0;
   private shots = 0;
@@ -163,6 +169,11 @@ export class ToolLayer {
       this.lastNetworkActivity = Date.now();
       const failure = request.failure()?.errorText ?? "failed";
       this.network.push(this.entryFor(request.method(), request.url(), null, request.resourceType(), failure));
+      // The target itself did not answer at all. That is infrastructure, not an application response
+      // (manual: Definitions, precedence row 1), so the runner turns it into INCONCLUSIVE.
+      if (CONNECTION_FAILURE.test(failure) && this.allowlist.check(request.url()).allowed) {
+        this.connectionFailures.push(`${request.method()} ${request.url()}: ${failure}`);
+      }
       // Route handlers do not see redirect hops. The browser's host rule refuses them instead, and
       // the failure is the only trace, so log it here. (Requests that the route handler aborted
       // are already logged there, and they fail with ERR_BLOCKED_BY_CLIENT.)
@@ -237,6 +248,7 @@ export class ToolLayer {
       page: () => this.current,
       network: () => this.network,
       consoleErrors: () => this.consoleLog,
+      infrastructureFailures: () => this.connectionFailures,
       setStep: (step) => {
         this.step = step;
       },

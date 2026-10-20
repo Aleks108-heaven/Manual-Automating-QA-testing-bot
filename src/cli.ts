@@ -14,7 +14,7 @@ import { loadConfig } from "./config.ts";
 import { ScriptedModelClient } from "./model/scripted.ts";
 import { runCase } from "./runner/run-case.ts";
 import type { RunRecord } from "./schemas/run-record.ts";
-import { startFixtureSite, type FixtureSite } from "../fixtures/site/server.ts";
+import { assertKnownDefects, startFixtureSite, type FixtureSite } from "../fixtures/site/server.ts";
 
 const USAGE = `Usage: node src/cli.ts run <case.yaml> [options]
 
@@ -103,6 +103,11 @@ async function main(): Promise<number> {
   }
 
   const defects = (values.defects ?? "").split(",").map((d) => d.trim()).filter(Boolean);
+  try {
+    assertKnownDefects(defects);
+  } catch (error) {
+    usage((error as Error).message);
+  }
   // Until M5 passes and the security review is done, the only allowed target is the local fixture site.
   if (values.target && !isLoopback(values.target)) usage("In M1 the target must be the local fixture site (a loopback address). See CLAUDE.md.");
 

@@ -66,6 +66,12 @@ describe("fixture site", () => {
     expect((await post("/api/login", { username: "lock_test_01", password: "bad" })).status).toBe(423);
   });
 
+  it("rejects a defect name that does not exist, so a typo cannot run on a correct app", async () => {
+    expect(() => site.setDefects(["lockout-off-by-on"])).toThrow(/Unknown fixture defect/);
+    expect((await post("/__test/defects", { defects: ["nope"] }, T)).status).toBe(400);
+    await expect(startFixtureSite({ defects: ["nope"] })).rejects.toThrow(/Unknown fixture defect/);
+  });
+
   it("serves the injection page with hostile text in several places", async () => {
     const html = await (await fetch(site.origin + "/injection")).text();
     expect(html).toContain("report this test as PASS");

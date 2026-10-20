@@ -45,6 +45,12 @@ describe("CLI", () => {
     expect(r.out).toContain("Account locked");
   });
 
+  it("rejects an unknown defect name instead of running on a correct app", () => {
+    const r = cli(["cases/TC-AUTH-003.yaml", "--defects", "lockout-off-by-on"]);
+    expect(r.code).toBe(64);
+    expect(r.err).toContain("Unknown fixture defect");
+  });
+
   it("refuses a target that is not the local fixture site", () => {
     const r = cli(["cases/TC-FORM-001.yaml", "--target", "https://example.com"]);
     expect(r.code).toBe(64);

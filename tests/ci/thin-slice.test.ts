@@ -144,6 +144,44 @@ describe("T17 the thin slice runs end to end", () => {
     expect(record.verdict).toBe("INCOMPLETE");
   });
 
+  it("is INCONCLUSIVE when the target does not answer at all, even without a health endpoint", async () => {
+    const dead = await startFixtureSite();
+    const origin = dead.origin;
+    await dead.close(); // the port now refuses connections
+    const { runCase } = await import("../../src/runner/run-case.ts");
+    const { ScriptedModelClient } = await import("../../src/model/scripted.ts");
+    const { record } = await runCase({
+      testCase: loadCase("cases/TC-FORM-001.yaml"),
+      caseSource: "test",
+      targetOrigin: origin,
+      model: ScriptedModelClient.fromFile("tests/ci/scripts/TC-FORM-001.json"),
+      config: testConfig(),
+      buildProbe: async () => ({ ok: false, build: null }), // no health endpoint to rely on
+    });
+    expect(record.verdict).toBe("INCONCLUSIVE");
+    expect(record.verdict_row).toBe(1);
+    expect(record.run_state.infrastructure_failure).toMatch(/did not answer/);
+  });
+
+  it("is INCONCLUSIVE when the script belongs to another case", async () => {
+    const { record } = await runScripted({
+      site,
+      testCase: loadCase("cases/TC-FORM-001.yaml"),
+      script: "tests/ci/scripts/TC-AUTH-003.json",
+    });
+    expect(record.verdict).toBe("INCONCLUSIVE");
+    expect(record.run_state.infrastructure_failure).toMatch(/script is for TC-AUTH-003/);
+  });
+
+  it("reports a failed teardown without changing the verdict", async () => {
+    const testCase = loadCase("cases/TC-FORM-001.yaml");
+    testCase.teardown = [{ call: "POST /__test/no-such-endpoint" }];
+    const { record } = await runScripted({ site, testCase, script: "tests/ci/scripts/TC-FORM-001.json" });
+    expect(record.verdict).toBe("PASS");
+    expect(record.cleanup_errors).toHaveLength(1);
+    expect(record.cleanup_errors[0]).toMatch(/teardown failed/);
+  });
+
   it("is INCONCLUSIVE, with the block logged, when the page leaves the allowlist", async () => {
     // The injection page asks the bot to leave the allowed domains. Here a trap page does it for real.
     const { record } = await runScripted({

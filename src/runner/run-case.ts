@@ -126,6 +126,8 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
     runnerStopOverride = "crash";
     fail(`the runner crashed: ${(error as Error).message}`);
   } finally {
+    const unanswered = access?.infrastructureFailures() ?? [];
+    if (unanswered.length > 0) fail(`the target did not answer: ${unanswered[0]}${unanswered.length > 1 ? ` (and ${unanswered.length - 1} more)` : ""}`);
     const after = await probe(targetOrigin);
     if (before.ok && !after.ok) fail("the health check was failing at the end of the run");
     else if (before.ok && after.ok && before.build !== after.build) fail(`the build changed mid-run (${before.build} to ${after.build})`);

@@ -35,6 +35,10 @@ export class ScriptedModelClient implements ModelClient {
   }
 
   async nextAction(context: ModelContext): Promise<ModelAction> {
+    // A script written for another case would run the wrong steps and could produce a misleading verdict.
+    if (context.testCase.id !== this.script.case_id) {
+      throw new Error(`the script is for ${this.script.case_id} but the case is ${context.testCase.id}`);
+    }
     const items = this.script.steps[context.stepIndex - 1] ?? [];
     const item = items[context.actionsInStep.length];
     if (!item) return { type: "step_done" };

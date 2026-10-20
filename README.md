@@ -31,6 +31,18 @@ Fixture defects you can turn on with `--defects`: `lockout-off-by-one`, `email-c
 
 If the negative control ever reports PASS, the bot is broken. Stop and fix it before trusting any other result.
 
+## What M1 does not do yet
+
+The manual describes the finished bot, and some of it is not built. Do not rely on these until their milestone:
+
+- `allowed_mutations` in a case is read but **not enforced** (M4).
+- `role`, `data` and secret references are read but not used (M2). There are no stored sessions and no `fill_secret` yet.
+- There are no time or cost budgets and no loop detection, only a hard cap on tool calls (M2).
+- There is no judge, so a `judged` expected result always gives NO_EVIDENCE (M3).
+- The only model is the scripted fake. No live model has been run.
+
+The review of what M1 does and does not do is in [docs/m1-review.md](docs/m1-review.md).
+
 ## What M1 proves
 
 | Test | Rule | File |
