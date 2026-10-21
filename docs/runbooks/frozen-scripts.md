@@ -65,7 +65,22 @@ node src/cli.ts frozen approve-proposal runs/<run dir>/proposal.json --by <your 
 
 This makes version N+1 with that one step replaced, and registers it. A proposal for any script other than the active one is stale and is refused. Version N stays on disk with its hash. Run the case again and read the report: the new step has not been proven by any run until it has run.
 
+## What a hostile or damaged file can and cannot do
+
+The registers, scripts, proposals, run records and reports sit on disk where anything else on the machine can write too. The bot does not trust them more than it must:
+
+- **No file is run on its word.** A script runs only if its hash is the registered one, its case file has the registered hash, and it passes the schema. The register may only point inside `frozen/scripts`. A case id is checked against the case id pattern wherever it is read (scripts, register, proposals), so it cannot become a path such as `..\..\x`.
+- **A script can only hold six acting tools** (`goto`, `click`, `fill`, `fill_secret`, `press`, `wait_for`), each with arguments that pass the tool layer's own schema. There is no shell, file or network tool to name. Even an approved script that goes to a host off the allowlist is refused by the tool layer at replay, and the run is INCONCLUSIVE.
+- **Files are size-capped before they are parsed** (1 MB for registers, scripts and proposals, 20 MB for run records and reports), so a huge file cannot exhaust memory.
+- **Writes are atomic**, and an approval holds a lock file (`frozen/register.json.lock`), so a second approval cannot interleave. A crash between the script file and the register entry is finished by approving the same script again, and a leftover file with other content is never overwritten. If a lock file is left behind by a crash, a person removes it.
+- **The hash in the record is checked at run time**, not only on the command line, so a run cannot stamp the approval of a script it did not replay.
+- **A proposer that hangs** is under the kill switch and the run's time budget like every other call. The kill switch ends the wait at once (`runner_stop_reason` is `killed`), and the time limit ends it as `timeout`.
+- **Freezing needs runs of the case as it is now.** Runs made with other step text, other expected results or another role are refused.
+
 ## Limits
+
+- **Approval is by name, not by identity.** `--by` is a name typed on the command line and compared with `release.approvers`. Nothing proves who typed it. This is the same for the kill switch and for the quarantine and override register. Binding an approval to a signed-in person (a signed commit, a ticket, a single-sign-on identity) is for the security reviewer and the program owner to decide before the bot gates anything.
+- The case file is looked up as `cases/<id>.yaml`. If a case lives elsewhere, pass `--case <file>` to `approve` and `approve-proposal`.
 
 - Everything here ran with a scripted fake model and a scripted proposer. A live proposer is not built, and its cost would be charged to the run's budget.
 - Locators in a script are the ones the actor used (role and name, or selector). The run record's `resolved_locator` field is still not filled, so a script cannot be hardened with a more stable locator yet.

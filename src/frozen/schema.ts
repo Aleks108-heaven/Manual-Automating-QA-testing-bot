@@ -1,6 +1,11 @@
-import { createHash } from "node:crypto";
 import { z } from "zod";
+import { hashText, stableJson } from "../hash.ts";
 import { TOOL_SCHEMAS, type ToolName } from "../tools/schemas.ts";
+
+export { hashText, stableJson };
+
+/** A case id. It becomes part of file names, so nothing else (no path separator, no "..") is accepted anywhere it is read. */
+export const CaseId = z.string().regex(/^TC-[A-Z]+-\d{3}$/);
 
 // Frozen scripts (build brief: Freezer, M7; manual: Purpose, "Hybrid path"; Guardrails, "Frozen scripts"). A script is the
 // acting tool calls of a case that proved stable, kept per step. The expected results stay in the case file and are still
@@ -11,22 +16,6 @@ export const Sha256 = z.string().regex(/^[0-9a-f]{64}$/);
 /** The tools a script may replay. The observation tools (snapshot, screenshot and the two error lists) change nothing, and the runner takes its own evidence. */
 export const FROZEN_TOOLS = ["goto", "click", "fill", "fill_secret", "press", "wait_for"] as const satisfies readonly ToolName[];
 export type FrozenTool = (typeof FROZEN_TOOLS)[number];
-
-/** A hash of text with line endings normalized, so a checkout with CRLF gives the same hash as one with LF. */
-export function hashText(text: string): string {
-  return createHash("sha256").update(text.replaceAll("\r\n", "\n")).digest("hex");
-}
-
-export function stableJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
-  if (value && typeof value === "object") {
-    return `{${Object.entries(value as Record<string, unknown>)
-      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-      .map(([k, v]) => `${JSON.stringify(k)}:${stableJson(v)}`)
-      .join(",")}}`;
-  }
-  return JSON.stringify(value);
-}
 
 /** One replayable action. Its arguments must satisfy the same schema the tool layer applies, so a script cannot hold a call the tool layer would reject as malformed. */
 export const FrozenActionSchema = z
@@ -42,7 +31,7 @@ export type FrozenAction = z.infer<typeof FrozenActionSchema>;
 
 export const FrozenScriptSchema = z.strictObject({
   schema_version: z.literal(1),
-  case_id: z.string().regex(/^TC-[A-Z]+-\d{3}$/),
+  case_id: CaseId,
   /** 1 for the first script. A change a person approves makes the next number. */
   version: z.number().int().min(1),
   /** The hash of the case file this script was frozen from. A script does not run against a case that has changed. */
@@ -64,7 +53,7 @@ export function serializeScript(script: FrozenScript): string {
 
 /** The register of approved scripts: who approved which hash, and when. The highest version of a case is its active script. */
 const RegisterEntrySchema = z.strictObject({
-  case_id: z.string().regex(/^TC-[A-Z]+-\d{3}$/),
+  case_id: CaseId,
   version: z.number().int().min(1),
   file: z.string().min(1),
   script_hash: Sha256,
@@ -107,7 +96,7 @@ export type ProposalBody = z.infer<typeof ProposalBodySchema>;
 export const ProposalSchema = z.strictObject({
   schema_version: z.literal(1),
   status: z.literal("proposed"),
-  case_id: z.string().min(1),
+  case_id: CaseId,
   /** The script the proposal is for. A proposal for any other hash is stale and cannot be approved. */
   script_version: z.number().int().min(1),
   script_hash: Sha256,

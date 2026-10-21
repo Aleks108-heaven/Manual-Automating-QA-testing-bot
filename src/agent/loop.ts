@@ -56,13 +56,13 @@ export interface LoopResult {
   judge: { calls: number; attempts: number; errors: string[]; injection: number };
 }
 
-const KILLED = Symbol("killed");
+export const KILLED = Symbol("killed");
 
 /**
  * Waits for a promise, but gives up as soon as the kill switch is engaged. Polls the switch every 100 ms, so a
  * model call or a tool call that is stuck cannot keep a paused runner busy.
  */
-function raceKill<T>(promise: Promise<T>, pause: PauseSource | undefined): Promise<T | typeof KILLED> {
+export function raceKill<T>(promise: Promise<T>, pause: PauseSource | undefined): Promise<T | typeof KILLED> {
   if (!pause) return promise;
   return new Promise((resolve, reject) => {
     const timer = setInterval(() => {

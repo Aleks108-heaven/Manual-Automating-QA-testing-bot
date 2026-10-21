@@ -10,7 +10,7 @@ import { exportScript } from "../../src/frozen/export.ts";
 import { ScriptedProposer } from "../../src/frozen/propose.ts";
 import { FrozenScriptModel } from "../../src/frozen/replay.ts";
 import { FrozenRegisterSchema, FrozenScriptSchema, hashText, ProposalSchema } from "../../src/frozen/schema.ts";
-import { approveProposal, approveScript, FrozenError, loadApprovedScript, loadFrozenRegister, nextVersion, readProposal, writeDraft, type ApprovedScript } from "../../src/frozen/store.ts";
+import { approveProposal, approveScript, FrozenError, loadApprovedScript, loadFrozenRegister, nextVersion, readFrozenScript, readProposal, scriptsDirectory, writeDraft, type ApprovedScript } from "../../src/frozen/store.ts";
 import { buildReport, loadRun } from "../../src/report/build.ts";
 import { formatReport } from "../../src/report/format.ts";
 import { runCase, type RunResult } from "../../src/runner/run-case.ts";
@@ -67,7 +67,7 @@ async function freezeAndApprove(casePath: string, scriptPath: string, config: Co
   if (!exported.ok) throw new Error(`could not freeze: ${exported.reasons.join("; ")}`);
   writeDraft(config, exported.script);
   approveScript({ config, script: exported.script, caseText, by: "Odin", today: "2026-10-21", reason: "test" });
-  const approved = loadApprovedScript({ register: loadFrozenRegister(config.frozen.registerFile), caseId: testCase.id, caseText, stepsInCase: testCase.steps.length });
+  const approved = loadApprovedScript({ register: loadFrozenRegister(config.frozen.registerFile), caseId: testCase.id, caseText, stepsInCase: testCase.steps.length, scriptsDirectory: scriptsDirectory(config) });
   return { approved, runs };
 }
 
@@ -238,7 +238,7 @@ describe("T21: a frozen script cannot turn a FAIL into a PASS", () => {
     // Version 1 is still on disk with the hash it was approved with.
     expect(hashText(readFileSync(approved.entry.file, "utf8"))).toBe(approved.scriptHash);
 
-    const v2 = loadApprovedScript({ register: loadFrozenRegister(config.frozen.registerFile), caseId: "TC-FORM-001", caseText, stepsInCase: testCase.steps.length });
+    const v2 = loadApprovedScript({ register: loadFrozenRegister(config.frozen.registerFile), caseId: "TC-FORM-001", caseText, stepsInCase: testCase.steps.length, scriptsDirectory: scriptsDirectory(config) });
     await fetch(site.origin + "/__test/reset", { method: "POST", headers: { "x-fixture-test": "1" }, body: "{}" });
     // The renamed button is in the page, so the approved change runs. The old proposal is now stale and cannot be approved again.
     const second = await replay(testCase, v2, config);
@@ -256,7 +256,7 @@ describe("a script that was not approved, or has changed, does not run", () => {
     const exported = exportScript({ runs, testCase, caseHash: hashText(readFileSync(FORM, "utf8")), minPassingRuns: 3, version: 1, now: "2026-10-21T10:00:00.000Z" });
     if (!exported.ok) throw new Error(exported.reasons.join("; "));
     writeDraft(config, exported.script);
-    expect(() => loadApprovedScript({ register: loadFrozenRegister(config.frozen.registerFile), caseId: "TC-FORM-001", caseText: readFileSync(FORM, "utf8"), stepsInCase: 3 })).toThrow(/no approved frozen script/);
+    expect(() => loadApprovedScript({ register: loadFrozenRegister(config.frozen.registerFile), caseId: "TC-FORM-001", caseText: readFileSync(FORM, "utf8"), stepsInCase: 3, scriptsDirectory: scriptsDirectory(config) })).toThrow(/no approved frozen script/);
   });
 
   it("refuses a script whose file changed after it was approved", async () => {
@@ -265,7 +265,7 @@ describe("a script that was not approved, or has changed, does not run", () => {
     const edited = readFileSync(approved.entry.file, "utf8").replace("not-an-email", "someone@example.com");
     expect(edited).not.toBe(readFileSync(approved.entry.file, "utf8"));
     writeFileSync(approved.entry.file, edited);
-    expect(() => loadApprovedScript({ register: loadFrozenRegister(config.frozen.registerFile), caseId: "TC-FORM-001", caseText: readFileSync(FORM, "utf8"), stepsInCase: 3 })).toThrow(/has changed since Odin approved it/);
+    expect(() => loadApprovedScript({ register: loadFrozenRegister(config.frozen.registerFile), caseId: "TC-FORM-001", caseText: readFileSync(FORM, "utf8"), stepsInCase: 3, scriptsDirectory: scriptsDirectory(config) })).toThrow(/has changed since Odin approved it/);
   });
 
   it("refuses a script when the case has changed since it was approved", async () => {
@@ -273,7 +273,7 @@ describe("a script that was not approved, or has changed, does not run", () => {
     await freezeAndApprove(FORM, FORM_SCRIPT, config);
     const loosened = readFileSync(FORM, "utf8").replace("exact: true", "exact: false");
     expect(loosened).not.toBe(readFileSync(FORM, "utf8"));
-    expect(() => loadApprovedScript({ register: loadFrozenRegister(config.frozen.registerFile), caseId: "TC-FORM-001", caseText: loosened, stepsInCase: 3 })).toThrow(/case TC-FORM-001 has changed/);
+    expect(() => loadApprovedScript({ register: loadFrozenRegister(config.frozen.registerFile), caseId: "TC-FORM-001", caseText: loosened, stepsInCase: 3, scriptsDirectory: scriptsDirectory(config) })).toThrow(/case TC-FORM-001 has changed/);
   });
 
   it("only a configured approver can approve, and a draft for a changed case cannot be approved", async () => {
@@ -287,7 +287,7 @@ describe("a script that was not approved, or has changed, does not run", () => {
     expect(() => approve("")).toThrow(/--by <name> is required/);
     expect(() => approve("Mallory")).toThrow(/not a configured approver/);
     expect(() => approve("Odin", caseText, frozenConfig((c) => void (c.release.approvers = [])))).toThrow(/No approver is configured/);
-    expect(() => approve("Odin", caseText.replace("exact: true", "exact: false"))).toThrow(/has changed since this script was frozen/);
+    expect(() => approve("Odin", caseText.replace("exact: true", "exact: false"))).toThrow(/is not the one TC-FORM-001 was frozen from/);
     expect(loadFrozenRegister(config.frozen.registerFile).scripts).toHaveLength(0);
     approve("Odin");
     expect(() => approve("Odin")).toThrow(/next script must be version 2/);

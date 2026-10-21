@@ -1,9 +1,12 @@
 // Builds the release report. It adds the register of quarantines and overrides and the inventory of P1 cases to a run
 // report, and says whether the evidence for the release decision is complete. It never says go or no-go.
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { CaseValidationError, loadCase } from "../cases/load.ts";
+import { stableJson } from "../hash.ts";
+import { loadRun } from "../report/build.ts";
 import type { Report } from "../report/schema.ts";
+import { READ_LIMITS, readTextCapped, TooLargeError } from "../safe-read.ts";
 import { RegisterSchema, ReleaseReportSchema, type Override, type Quarantine, type Register, type ReleaseReport } from "./schema.ts";
 
 export class ReleaseError extends Error {
@@ -24,8 +27,9 @@ export function loadRegister(path: string): Register {
   if (!existsSync(path)) throw new ReleaseError(`there is no register at ${path}. Create it, even when it is empty.`);
   let raw: unknown;
   try {
-    raw = JSON.parse(readFileSync(path, "utf8"));
-  } catch {
+    raw = JSON.parse(readTextCapped(path, READ_LIMITS.small, "the register"));
+  } catch (error) {
+    if (error instanceof TooLargeError) throw new ReleaseError(error.message);
     throw new ReleaseError(`the register at ${path} is not valid JSON`);
   }
   const parsed = RegisterSchema.safeParse(raw);
@@ -52,6 +56,33 @@ export function loadInventory(dir: string): { entries: InventoryEntry[]; problem
   return { entries, problems };
 }
 
+/**
+ * Checks each run record named in a report against the file on this machine: it has to be there, and it has to be the file the
+ * report was made from. A report that says PASS about a record that has since changed, or that cannot be found, is not evidence.
+ * Returns one problem per case that fails the check.
+ */
+export function checkRecordsOnDisk(report: Report): string[] {
+  const problems: string[] = [];
+  for (const c of report.cases) {
+    if (!c.run) continue;
+    const file = join(c.run.run_dir, "run.json");
+    if (!existsSync(file)) {
+      problems.push(`${c.id}: the run record ${file} is not on this machine, so the report's verdict could not be checked against it`);
+      continue;
+    }
+    const loaded = loadRun(c.run.run_dir);
+    if (!("record" in loaded)) {
+      problems.push(`${c.id}: the run record ${file} could not be read (${loaded.error})`);
+    } else if (loaded.recordHash !== c.run.record_sha256) {
+      problems.push(`${c.id}: the run record ${file} has changed since the report was made (its hash is not the one in the report)`);
+    } else if (loaded.record.verdict !== c.verdict || loaded.record.verdict_row !== c.verdict_row || stableJson(loaded.record.outcomes) !== stableJson(c.run.outcomes)) {
+      // The record is the one the report was made from, so the report was edited afterwards.
+      problems.push(`${c.id}: the report says ${c.verdict} (row ${c.verdict_row}) but the run record ${file} says ${loaded.record.verdict} (row ${loaded.record.verdict_row}), or its outcomes differ, so the report was changed after it was made`);
+    }
+  }
+  return problems;
+}
+
 export interface ReleaseInput {
   releaseId: string;
   generatedAt: string;
@@ -63,10 +94,17 @@ export interface ReleaseInput {
   inventoryProblems: readonly string[];
   approvers: readonly string[];
   decisionMaker: string | null;
+  /** Problems found when the report's run records were checked against the files on disk (checkRecordsOnDisk). Each keeps the evidence incomplete. */
+  recordProblems?: readonly string[];
+  /** Says whether a piece of evidence named in an override exists. A link always counts. Defaults to "yes", for callers that cannot look. */
+  evidenceExists?: (path: string) => boolean;
 }
+
+const IS_LINK = /^https?:\/\//i;
 
 export function buildRelease(input: ReleaseInput): ReleaseReport {
   const { report, register, approvers, today } = input;
+  const evidenceExists = input.evidenceExists ?? (() => true);
   const inRun = new Map(report.cases.map((c) => [c.id, c]));
   const inventoryIds = new Set(input.inventory.map((e) => e.id));
 
@@ -76,6 +114,7 @@ export function buildRelease(input: ReleaseInput): ReleaseReport {
     let problem: string | null = null;
     if (!approvers.includes(q.approver)) problem = `${q.approver} is not a configured approver`;
     else if (!inventoryIds.has(q.case_id)) problem = `${q.case_id} is not a case in the inventory`;
+    else if (q.quarantined_on > today) problem = `the quarantine is dated ${q.quarantined_on}, which is after ${today}`;
     else if (q.deadline < q.quarantined_on) problem = "the deadline is before the day it was quarantined";
     else if (seenQuarantine.has(q.case_id)) problem = `${q.case_id} is quarantined twice`;
     if (problem === null) seenQuarantine.add(q.case_id);
@@ -92,6 +131,11 @@ export function buildRelease(input: ReleaseInput): ReleaseReport {
     else if (!c || !c.run) problem = `${o.case_id} has no executed run in this report`;
     else if (c.run.run_id !== o.run_id) problem = `the override is for run ${o.run_id}, not run ${c.run.run_id}. An override does not carry over to another run.`;
     else if (c.verdict !== "FAIL") problem = `only a FAIL can be overridden, and this run is ${c.verdict}`;
+    else if (o.recorded_on > today) problem = `the override is dated ${o.recorded_on}, which is after ${today}`;
+    else {
+      const missing = o.evidence.filter((e) => !IS_LINK.test(e) && !evidenceExists(e));
+      if (missing.length > 0) problem = `the evidence ${missing.join(", ")} was not found, and an override needs its evidence attached`;
+    }
     return { ...o, status: problem === null ? ("applied" as const) : ("invalid" as const), problem };
   });
   const overriddenCases = new Set(overrides.filter((o) => o.status === "applied").map((o) => o.case_id));
@@ -114,6 +158,7 @@ export function buildRelease(input: ReleaseInput): ReleaseReport {
 
   const problems = [
     ...input.inventoryProblems,
+    ...(input.recordProblems ?? []),
     ...quarantines.filter((q) => q.status === "invalid").map((q) => `quarantine of ${q.case_id}: ${q.problem}`),
     ...overrides.filter((o) => o.status === "invalid").map((o) => `override of ${o.case_id}: ${o.problem}`),
   ];
@@ -124,7 +169,7 @@ export function buildRelease(input: ReleaseInput): ReleaseReport {
   if (count("blocking") > 0) reasons.push(`${count("blocking")} P1 case(s) are not PASS`);
   if (count("not_in_run") > 0) reasons.push(`${count("not_in_run")} P1 case(s) are not in the run`);
   if (p1_cases.length === 0) reasons.push("the inventory holds no P1 case, so there is nothing to verify");
-  if (problems.length > 0) reasons.push(`${problems.length} fault(s) in the register or the case inventory`);
+  if (problems.length > 0) reasons.push(`${problems.length} fault(s) in the register, the case inventory or the run records`);
   if (quarantines.some((q) => q.status === "overdue")) reasons.push("a quarantine is past its deadline, and that case is back in gating");
 
   return ReleaseReportSchema.parse({

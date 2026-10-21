@@ -33,11 +33,13 @@ If the locator in `where` matches nothing, a `text_visible` or `element_state` e
 | Kind | Fields | Checked by |
 | --- | --- | --- |
 | text_visible | where (role and name, or selector), text, and optionally `exact: true` | Assertion |
-| url | equals or matches | Assertion |
+| url | equals, or matches (a regular expression, see below) | Assertion |
 | status | request pattern, status code | Assertion on the network log |
 | count | where, expected number | Assertion |
 | element_state | where, state (visible, enabled, checked, and so on) | Assertion |
 | judged | description only | LLM judge, citing evidence |
+
+**Patterns in a `url` entry.** A pattern that backtracks badly can freeze the runner, and the page decides the URL it is tested against, so a pattern is checked when the case is validated and an unsafe one makes the case invalid. A pattern may be at most 200 characters, may not use back-references, may have at most two unbounded repeats (`*`, `+`, `{n,}`), and a group that is repeated with `*`, `+` or `{n,m}` may not contain a repeat or an alternation (so `(a+)+` and `(a|aa)*` are refused, while `(a|b)` and `(a+)?` are fine). The URL is tested only up to its first 2048 characters. Prefer `equals` when the exact URL is known.
 
 **Rules**
 

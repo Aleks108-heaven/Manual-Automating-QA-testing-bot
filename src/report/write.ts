@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { Redactor } from "../redact/redactor.ts";
 import { scanArtifacts } from "../redact/scan.ts";
 import { formatReport } from "./format.ts";
@@ -12,7 +12,7 @@ import { ReportSchema, type Report } from "./schema.ts";
 export function writeRelease(release: ReleaseReport, runsDir: string): { dir: string; json: string; text: string } {
   ReleaseReportSchema.parse(release);
   const dir = join(runsDir, "releases", release.release_id);
-  mkdirSync(dir, { recursive: true });
+  makeNewDirectory(dir);
   const json = join(dir, "release.json");
   const text = join(dir, "release.txt");
   writeFileSync(json, JSON.stringify(release, null, 2));
@@ -25,9 +25,20 @@ export function writeRelease(release: ReleaseReport, runsDir: string): { dir: st
   return { dir, json, text };
 }
 
+/** Creates the folder for a new report. A report that is already stored is never overwritten, so a stored decision record cannot be replaced by a later one with the same id. */
+function makeNewDirectory(dir: string): void {
+  mkdirSync(dirname(dir), { recursive: true });
+  try {
+    mkdirSync(dir);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new Error(`${dir} already exists. A stored report is never overwritten.`);
+    throw error;
+  }
+}
+
 export function newReportId(now: Date = new Date()): string {
   const stamp = now.toISOString().replace(/[-:]/g, "").replace(/\..*/, "").replace("T", "-");
-  return `${stamp}-report-${randomBytes(2).toString("hex")}`;
+  return `${stamp}-report-${randomBytes(4).toString("hex")}`;
 }
 
 export function newReleaseId(now: Date = new Date()): string {
@@ -42,7 +53,7 @@ export function newReleaseId(now: Date = new Date()): string {
 export function writeReport(report: Report, runsDir: string): { dir: string; json: string; text: string } {
   ReportSchema.parse(report);
   const dir = join(runsDir, "reports", report.report_id);
-  mkdirSync(dir, { recursive: true });
+  makeNewDirectory(dir);
   const json = join(dir, "report.json");
   const text = join(dir, "report.txt");
   writeFileSync(json, JSON.stringify(report, null, 2));

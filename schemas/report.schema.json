@@ -344,6 +344,10 @@
                   "run_dir": {
                     "type": "string"
                   },
+                  "record_sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
                   "started_at": {
                     "type": "string"
                   },
@@ -1227,6 +1231,7 @@
                 "required": [
                   "run_id",
                   "run_dir",
+                  "record_sha256",
                   "started_at",
                   "finished_at",
                   "target",

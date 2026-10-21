@@ -3,6 +3,7 @@
 // No LLM is involved. `judged` results go to the judge, which arrives in M3.
 import type { Config } from "../config.ts";
 import type { ExpectedResult } from "../schemas/case.ts";
+import { MAX_URL_LENGTH_TESTED } from "../schemas/safe-pattern.ts";
 import { describeWhere, type Outcome } from "../schemas/common.ts";
 import type { OutcomeRecord } from "../schemas/run-record.ts";
 import { locatorFor } from "../tools/locate.ts";
@@ -99,7 +100,8 @@ function checkFor(e: ExpectedResult, ctx: OracleContext): (() => Promise<Check>)
           const ok = e.equals.startsWith("/") ? pathAndQuery === e.equals || url.pathname === e.equals : url.href === e.equals;
           return { ok, actual: e.equals.startsWith("/") ? pathAndQuery : url.href };
         }
-        return { ok: new RegExp(e.matches as string).test(url.href), actual: url.href };
+        // The pattern was checked when the case was validated. The URL comes from the page, so only its first part is tested.
+        return { ok: new RegExp(e.matches as string).test(url.href.slice(0, MAX_URL_LENGTH_TESTED)), actual: url.href };
       };
     case "status": {
       const [method, path] = e.request.split(" ") as [string, string];

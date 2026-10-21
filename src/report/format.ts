@@ -1,6 +1,7 @@
 // Renders a report as text for the terminal and for the stored report.txt. It reads the report only, never the
 // run records, so what a person reads is what the report's JSON says.
 import { join } from "node:path";
+import { cleanForTerminal } from "./sanitize.ts";
 import type { Report, CaseEntry, Stamp, StampName } from "./schema.ts";
 
 function stamp(report: Report, name: StampName): Stamp {
@@ -171,5 +172,5 @@ export function formatReport(report: Report): string {
   }
   for (const c of report.cases) lines.push(...formatCase(c), "");
   lines.push(...formatSummary(report));
-  return lines.join("\n");
+  return cleanForTerminal(lines.join("\n"));
 }

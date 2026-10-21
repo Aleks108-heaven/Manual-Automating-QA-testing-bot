@@ -1,8 +1,10 @@
 // Builds a report from stored run records. The reporter adds nothing the records do not hold, and it does not take a
 // record's word for its own verdict: it recomputes the verdict from the stored outcomes and run state with the same
 // calculator the runner used, and it refuses a record that disagrees with itself.
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import { hashText } from "../hash.ts";
+import { READ_LIMITS, readTextCapped, TooLargeError } from "../safe-read.ts";
 import { RunRecordSchema, type RunRecord } from "../schemas/run-record.ts";
 import type { Verdict } from "../schemas/common.ts";
 import { calculateVerdict } from "../verdict/calculate.ts";
@@ -27,7 +29,8 @@ export interface PlanEntry {
   control?: string;
 }
 
-export type LoadedRun = { path: string; runDir: string } & ({ record: RunRecord } | { error: string });
+/** A run record read from disk, with the hash of the file it came from. The report carries the hash, so a later reader can tell if the file changed. */
+export type LoadedRun = { path: string; runDir: string } & ({ record: RunRecord; recordHash: string } | { error: string });
 
 const SUPPORTED_VERSION = 6;
 
@@ -36,9 +39,15 @@ export function loadRun(path: string): LoadedRun {
   const file = existsSync(path) && statSync(path).isDirectory() ? join(path, "run.json") : path;
   const runDir = dirname(file);
   if (!existsSync(file)) return { path, runDir, error: "there is no run.json there" };
+  let text: string;
+  try {
+    text = readTextCapped(file, READ_LIMITS.runRecord, "run.json");
+  } catch (error) {
+    return { path, runDir, error: error instanceof TooLargeError ? error.message : "run.json could not be read" };
+  }
   let raw: unknown;
   try {
-    raw = JSON.parse(readFileSync(file, "utf8"));
+    raw = JSON.parse(text);
   } catch {
     return { path, runDir, error: "run.json is not valid JSON" };
   }
@@ -51,7 +60,7 @@ export function loadRun(path: string): LoadedRun {
     const issues = parsed.error.issues.slice(0, 3).map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`);
     return { path, runDir, error: `run.json does not match the run record schema (${issues.join("; ")})` };
   }
-  return { path, runDir, record: parsed.data };
+  return { path, runDir, record: parsed.data, recordHash: hashText(text) };
 }
 
 /**
@@ -219,7 +228,7 @@ function bugDraft(record: RunRecord, runDir: string, control: string | null): Bu
   };
 }
 
-function runView(record: RunRecord, runDir: string): RunView {
+function runView(record: RunRecord, runDir: string, recordHash: string): RunView {
   const pathOf = (id: string): string | null => {
     const e = record.evidence.find((x) => x.id === id);
     return e ? join(runDir, e.path) : null;
@@ -229,6 +238,7 @@ function runView(record: RunRecord, runDir: string): RunView {
   return {
     run_id: record.run_id,
     run_dir: runDir,
+    record_sha256: recordHash,
     started_at: record.started_at,
     finished_at: record.finished_at,
     target: record.target,
@@ -292,7 +302,7 @@ export function buildReport(input: ReportInput): Report {
     planIds.add(p.id);
   }
 
-  const byCase = new Map<string, LoadedRun & { record: RunRecord }>();
+  const byCase = new Map<string, LoadedRun & { record: RunRecord; recordHash: string }>();
   for (const r of input.runs) {
     if (!("record" in r)) {
       if (declared) throw new ReportError(`the run at ${r.path} could not be read: ${r.error}`);
@@ -300,7 +310,7 @@ export function buildReport(input: ReportInput): Report {
     }
     if (!planIds.has(r.record.case.id)) throw new ReportError(`the run at ${r.path} is for ${r.record.case.id}, which is not in the plan`);
     if (byCase.has(r.record.case.id)) throw new ReportError(`two runs were given for ${r.record.case.id} (${byCase.get(r.record.case.id)!.path} and ${r.path}). Choose one.`);
-    byCase.set(r.record.case.id, r as LoadedRun & { record: RunRecord });
+    byCase.set(r.record.case.id, r as LoadedRun & { record: RunRecord; recordHash: string });
   }
 
   const cases: CaseEntry[] = plan.map((p) => {
@@ -323,7 +333,7 @@ export function buildReport(input: ReportInput): Report {
           verified: r.verdict === "PASS",
           rationale: rationale(r),
           attention: attentionFor(r.case.priority, r.verdict, r),
-          run: runView(r, run.runDir),
+          run: runView(r, run.runDir, run.recordHash),
           // A negative control fails on purpose. Its draft is marked as a control, and a person decides what to do with it.
           bug_draft: r.verdict === "FAIL" ? bugDraft(r, run.runDir, p.control ?? null) : null,
         };

@@ -1,3 +1,4 @@
+import { cleanForTerminal } from "../report/sanitize.ts";
 import type { ReleaseReport } from "./schema.ts";
 
 /** The release report as text. It names the decision-maker and never states a decision. */
@@ -28,5 +29,5 @@ export function formatRelease(r: ReleaseReport): string {
     out.push("Faults a person must fix:");
     for (const p of r.problems) out.push(`  - ${p}`);
   }
-  return out.join("\n");
+  return cleanForTerminal(out.join("\n"));
 }

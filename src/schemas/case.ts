@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { isValidDeclaration } from "../tools/mutations.ts";
 import { WhereSchema } from "./common.ts";
+import { patternProblem } from "./safe-pattern.ts";
 
 // The case template is defined on the manual's page "Writing bot-ready test cases"
 // (docs/manual/06-writing-bot-ready-test-cases.md).
@@ -28,8 +29,13 @@ const Url = z
     equals: z.string().min(1).optional(),
     matches: z.string().min(1).optional(),
   })
-  .refine((v) => (v.equals === undefined) !== (v.matches === undefined), {
-    message: "a url entry needs exactly one of equals or matches",
+  .superRefine((v, ctx) => {
+    if ((v.equals === undefined) === (v.matches === undefined)) {
+      ctx.addIssue({ code: "custom", message: "a url entry needs exactly one of equals or matches" });
+    }
+    // A pattern is checked now, before any run, because one that backtracks badly would freeze the runner (see safe-pattern.ts).
+    const problem = v.matches === undefined ? null : patternProblem(v.matches);
+    if (problem) ctx.addIssue({ code: "custom", path: ["matches"], message: problem });
   });
 
 const Status = z.strictObject({

@@ -39,14 +39,15 @@ import { buildReport, loadRun, ReportError, type PlanEntry } from "./report/buil
 import { formatReport } from "./report/format.ts";
 import type { Report } from "./report/schema.ts";
 import { newReleaseId, newReportId, writeRelease, writeReport } from "./report/write.ts";
-import { buildRelease, loadInventory, loadRegister, ReleaseError } from "./release/build.ts";
+import { buildRelease, checkRecordsOnDisk, loadInventory, loadRegister, ReleaseError } from "./release/build.ts";
 import { formatRelease } from "./release/format.ts";
 import { ReportSchema } from "./report/schema.ts";
 import { exportScript } from "./frozen/export.ts";
 import { ScriptedProposer } from "./frozen/propose.ts";
 import { FrozenScriptModel } from "./frozen/replay.ts";
-import { FrozenScriptSchema, hashText } from "./frozen/schema.ts";
-import { approveProposal, approveScript, FrozenError, loadApprovedScript, loadFrozenRegister, nextVersion, readProposal, writeDraft } from "./frozen/store.ts";
+import { hashText } from "./hash.ts";
+import { READ_LIMITS, readTextCapped, TooLargeError } from "./safe-read.ts";
+import { approveProposal, approveScript, FrozenError, loadApprovedScript, loadFrozenRegister, nextVersion, readFrozenScript, readProposal, scriptsDirectory, writeDraft } from "./frozen/store.ts";
 import { startOutsideServer } from "../fixtures/outside-server.ts";
 import { assertKnownDefects, startFixtureSite, type FixtureSite } from "../fixtures/site/server.ts";
 
@@ -54,8 +55,8 @@ const USAGE = `Usage: node src/cli.ts run <case.yaml>... [options]
        node src/cli.ts report <run directory or run.json>... [--plan a.yaml,b.yaml]
        node src/cli.ts release <report.json or report directory> [--register <file>] [--cases-dir <dir>] [--today YYYY-MM-DD]
        node src/cli.ts frozen freeze <case.yaml> <run directory>...
-       node src/cli.ts frozen approve <draft.json> --by <name>
-       node src/cli.ts frozen approve-proposal <proposal.json> --by <name>
+       node src/cli.ts frozen approve <draft.json> --by <name> [--case <case.yaml>]
+       node src/cli.ts frozen approve-proposal <proposal.json> --by <name> [--case <case.yaml>]
        node src/cli.ts frozen run <case.yaml> [--proposal-script <file>] [--defects a,b] [--target <url>]
        node src/cli.ts preflight [--cases a.yaml,b.yaml] [--out <file>] [--for-resume]
        node src/cli.ts eval mutants [--sample N] [--repeat R] [--out-dir <dir>]
@@ -299,7 +300,13 @@ function releaseCommand(reportPath: string | undefined, values: { register?: str
   try {
     const file = existsSync(reportPath) && statSync(reportPath).isDirectory() ? join(reportPath, "report.json") : reportPath;
     if (!existsSync(file)) throw new ReleaseError(`there is no report at ${file}`);
-    const parsed = ReportSchema.safeParse(JSON.parse(readFileSync(file, "utf8")));
+    let rawReport: unknown;
+    try {
+      rawReport = JSON.parse(readTextCapped(file, READ_LIMITS.report, "the report"));
+    } catch (error) {
+      throw new ReleaseError(error instanceof TooLargeError ? error.message : `the report at ${file} is not valid JSON`);
+    }
+    const parsed = ReportSchema.safeParse(rawReport);
     if (!parsed.success) throw new ReleaseError(`the report at ${file} is not a valid report: ${parsed.error.issues[0]?.message ?? "unknown"}`);
     const inventory = loadInventory(values["cases-dir"] ?? config.release.casesDirectory);
     const release = buildRelease({
@@ -312,6 +319,9 @@ function releaseCommand(reportPath: string | undefined, values: { register?: str
       inventoryProblems: inventory.problems,
       approvers: config.release.approvers,
       decisionMaker: config.release.decisionMaker,
+      // The report is checked against the run records it was made from, and an override's evidence has to exist.
+      recordProblems: checkRecordsOnDisk(parsed.data),
+      evidenceExists: (path) => existsSync(path),
     });
     const written = writeRelease(release, config.runs.directory);
     console.log(formatRelease(release));
@@ -331,10 +341,12 @@ function releaseCommand(reportPath: string | undefined, values: { register?: str
  * (nothing else makes a script runnable), and `run` replays an approved script with no model. A script that is not approved,
  * or whose file or case has changed, does not run, and the report lists the case as not executed.
  */
-async function frozenCommand(action: string | undefined, args: string[], values: { by?: string; today?: string; "proposal-script"?: string; defects?: string; target?: string }): Promise<number> {
+async function frozenCommand(action: string | undefined, args: string[], values: { by?: string; today?: string; case?: string; "proposal-script"?: string; defects?: string; target?: string }): Promise<number> {
   const config = loadConfig();
   const today = values.today ?? new Date().toISOString().slice(0, 10);
-  const caseFileFor = (id: string) => join(config.release.casesDirectory, `${id}.yaml`);
+  // The case file is found by its id in the cases folder, unless --case names it. The ids that reach here have been checked
+  // against the case id pattern, so an id from a file cannot point somewhere else.
+  const caseFileFor = (id: string) => values.case ?? join(config.release.casesDirectory, `${id}.yaml`);
   try {
     if (action === "freeze") {
       const [casePath, ...runPaths] = args;
@@ -366,7 +378,7 @@ async function frozenCommand(action: string | undefined, args: string[], values:
     if (action === "approve") {
       const [draftPath] = args;
       if (!draftPath) return usage("Expected: frozen approve <draft.json> --by <name>");
-      const script = FrozenScriptSchema.parse(JSON.parse(readFileSync(draftPath, "utf8")));
+      const script = readFrozenScript(draftPath);
       const entry = approveScript({
         config,
         script,
@@ -414,7 +426,7 @@ async function frozenRun(casePath: string | undefined, values: { "proposal-scrip
   const plan: PlanEntry = { id: testCase.id, source: casePath, title: testCase.title, priority: testCase.priority };
   let approved;
   try {
-    approved = loadApprovedScript({ register: loadFrozenRegister(config.frozen.registerFile), caseId: testCase.id, caseText: readFileSync(casePath, "utf8"), stepsInCase: testCase.steps.length });
+    approved = loadApprovedScript({ register: loadFrozenRegister(config.frozen.registerFile), caseId: testCase.id, caseText: readFileSync(casePath, "utf8"), stepsInCase: testCase.steps.length, scriptsDirectory: scriptsDirectory(config) });
   } catch (error) {
     if (!(error instanceof FrozenError)) throw error;
     // A script that must not run is reported as a case that did not run, like any other refusal.
@@ -516,6 +528,7 @@ async function main(): Promise<number> {
       "cases-dir": { type: "string" },
       today: { type: "string" },
       "proposal-script": { type: "string" },
+      case: { type: "string" },
       out: { type: "string" },
       "for-resume": { type: "boolean", default: false },
       sample: { type: "string" },

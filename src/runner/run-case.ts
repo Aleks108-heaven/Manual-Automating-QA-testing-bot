@@ -2,8 +2,9 @@
 import { createHash, randomBytes } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { BudgetGuard, type BudgetStop } from "../agent/budget.ts";
-import { runAgentLoop, type LoopResult } from "../agent/loop.ts";
+import { BudgetGuard, DeadlineExceeded, withDeadline, type BudgetStop } from "../agent/budget.ts";
+import { KILLED, raceKill, runAgentLoop, type LoopResult } from "../agent/loop.ts";
+import { hashText } from "../hash.ts";
 import { requestFinalOutput } from "./final-output.ts";
 import { ImplicitCollector } from "../implicit/collect.ts";
 import type { JudgeClient } from "../judge/client.ts";
@@ -22,7 +23,7 @@ import type { ActorOutput } from "../schemas/actor.ts";
 import { RunRecordSchema, type FrozenStamp, type RunRecord } from "../schemas/run-record.ts";
 import { ToolLayer, type RunnerAccess, type SharedBrowser } from "../tools/tool-layer.ts";
 import { requestProposal, type Proposer } from "../frozen/propose.ts";
-import type { FrozenScript } from "../frozen/schema.ts";
+import { serializeScript, type FrozenScript } from "../frozen/schema.ts";
 import { writeProposal } from "../frozen/store.ts";
 import { calculateVerdict } from "../verdict/calculate.ts";
 
@@ -105,6 +106,12 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
   const { testCase, config, model, targetOrigin } = options;
   // A paused runner does not start runs. This check is the last line of defense, after the pre-flight check.
   if (options.pause?.isPaused()) throw new RunnerPausedError((options.pause as Partial<KillSwitch>).status?.() ?? { paused: true });
+  // The hash stamped in the record has to be the hash of the script that runs. The command line has already checked the file
+  // against the register, and this keeps a caller that passes something else from stamping an approval the script never had.
+  if (options.frozen) {
+    if (hashText(serializeScript(options.frozen.script)) !== options.frozen.scriptHash) throw new Error("the frozen script given is not the one that was approved (its hash is not scriptHash)");
+    if (options.frozen.script.case_id !== testCase.id) throw new Error(`the frozen script is for ${options.frozen.script.case_id} but the case is ${testCase.id}`);
+  }
   const probe = options.buildProbe ?? defaultBuildProbe;
   const runId = newRunId(testCase.id);
   const runDir = join(config.runs.directory, runId);
@@ -127,6 +134,8 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
   let blocked: RunRecord["blocked"] = null;
   let implicit: ImplicitCollector | null = null;
   let modelOutput: { attempts: number; valid: boolean; errors: string[] } = { attempts: 0, valid: false, errors: [] };
+  // The kill switch was engaged after the loop ended, while the frozen script's proposal was being made.
+  let lateStop: "killed" | null = null;
   let reengagement: FrozenStamp["reengagement"] = "not_needed";
   let proposalFile: string | null = null;
   const proposalStats = { attempts: 0, errors: [] as string[] };
@@ -230,26 +239,54 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
       if (options.frozen && blocked && failedAction) {
         if (!options.frozen.proposer) {
           reengagement = "not_requested";
+        } else if (options.pause?.isPaused()) {
+          lateStop = "killed";
+          reengagement = "proposal_invalid";
+          proposalStats.errors = ["the runner was paused by the kill switch, so no proposal was asked for"];
         } else {
           const step = blocked.step;
-          const snapshot = await tools.call("snapshot", {});
-          const asked = await requestProposal({
-            proposer: options.frozen.proposer,
-            request: {
-              testCase,
-              script: options.frozen.script,
-              step,
-              stepText: blocked.step_text,
-              failed: { tool: failedAction.tool, args: redactor.scrubJson(failedAction.args) as Record<string, unknown>, error: redactor.scrubText(failedAction.error ?? "") },
-              snapshot: snapshot.ok ? String((snapshot.data as { snapshot?: unknown }).snapshot ?? "").slice(0, 20_000) : null,
-            },
-            maxAttempts: config.modelOutput.maxAttempts,
-            redactor,
-            charge: (usage) => {
-              guard.chargeUsage(usage);
-              return guard.check(0) === null;
-            },
-          }).catch((error: unknown) => ({ body: null, attempts: 1, errors: [redactor.scrubText(`the proposer failed: ${(error as Error).message}`)] }));
+          const toolLayer = tools;
+          const proposer = options.frozen.proposer;
+          const script = options.frozen.script;
+          // The snapshot and the proposer are under the same rules as every other call in the run: the kill switch ends the wait at
+          // once, and the run's time budget bounds it. A proposer that hangs cannot keep a paused or timed-out runner busy.
+          const work = (async () => {
+            const snapshot = await toolLayer.call("snapshot", {});
+            return requestProposal({
+              proposer,
+              request: {
+                testCase,
+                script,
+                step,
+                stepText: blocked.step_text,
+                failed: { tool: failedAction.tool, args: redactor.scrubJson(failedAction.args) as Record<string, unknown>, error: redactor.scrubText(failedAction.error ?? "") },
+                snapshot: snapshot.ok ? String((snapshot.data as { snapshot?: unknown }).snapshot ?? "").slice(0, 20_000) : null,
+              },
+              maxAttempts: config.modelOutput.maxAttempts,
+              redactor,
+              charge: (usage) => {
+                guard.chargeUsage(usage);
+                return guard.check(0) === null;
+              },
+            });
+          })();
+          let asked: Awaited<ReturnType<typeof requestProposal>>;
+          try {
+            const raced = await raceKill(withDeadline(work, guard.remainingMs), options.pause);
+            if (raced === KILLED) {
+              lateStop = "killed";
+              asked = { body: null, attempts: 0, errors: ["the runner was paused by the kill switch while a proposal was being made"] };
+            } else {
+              asked = raced;
+            }
+          } catch (error) {
+            if (error instanceof DeadlineExceeded) {
+              finalBudgetStop = { reason: "timeout", detail: `time limit of ${config.budgets.maxWallMs} ms reached while waiting for a proposal` };
+              asked = { body: null, attempts: 1, errors: ["the time limit ran out while a proposal was being made"] };
+            } else {
+              asked = { body: null, attempts: 1, errors: [redactor.scrubText(`the proposer failed: ${(error as Error).message}`)] };
+            }
+          }
           proposalStats.attempts = asked.attempts;
           proposalStats.errors = asked.errors;
           if (asked.body) {
@@ -275,7 +312,7 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
       }
 
       // A stop decided by the runner (the loop detector) leaves nothing for the model to report.
-      if (loop.runnerStop === null && !loop.guardrailBlock && loop.stopSource !== "runner") {
+      if (loop.runnerStop === null && lateStop === null && finalBudgetStop === null && !loop.guardrailBlock && loop.stopSource !== "runner") {
         const final = await requestFinalOutput({ model, testCase, actorStop: loop.actorStop, guard, config, redactor });
         modelOutput = { attempts: final.attempts, valid: final.output !== null, errors: final.errors };
         output = final.output;
@@ -318,7 +355,7 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
   const runState = {
     actor_stop_reason: loop?.actorStop?.reason ?? null,
     stop_source: loop?.stopSource ?? null,
-    runner_stop_reason: runnerStopOverride ?? loop?.runnerStop ?? finalBudgetStop?.reason ?? null,
+    runner_stop_reason: runnerStopOverride ?? loop?.runnerStop ?? lateStop ?? finalBudgetStop?.reason ?? null,
     infrastructure_failure: infrastructureFailure,
     guardrail_block: loop?.guardrailBlock ?? false,
     // Either the actor or the judge reported an attempt to influence it. It does not change the verdict.

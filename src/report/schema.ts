@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { VERDICTS, VerdictSchema } from "../schemas/common.ts";
 import { GuardrailEventSchema, OutcomeRecordSchema, RunRecordSchema } from "../schemas/run-record.ts";
+import { calculateVerdict } from "../verdict/calculate.ts";
 
 // The report is a view over the run records (build brief: Run record). Everything in it comes from stored run
 // records and the declared plan; nothing is asked of a model. The anatomy is on the manual's page "Reading results
@@ -87,6 +88,8 @@ export type BugDraft = z.infer<typeof BugDraftSchema>;
 const RunViewSchema = z.strictObject({
   run_id: z.string(),
   run_dir: z.string(),
+  /** The hash of the run.json this view was made from. The release report checks the file on disk against it. */
+  record_sha256: z.string().regex(/^[0-9a-f]{64}$/),
   started_at: z.string(),
   finished_at: z.string(),
   target: z.string(),
@@ -197,6 +200,23 @@ export const ReportSchema = z
       if ((c.status === "executed") !== (c.run !== null)) fail(`${c.id}: status and run disagree`);
       if ((c.status === "executed") !== (c.verdict !== null)) fail(`${c.id}: status and verdict disagree`);
       if (c.verified !== (c.verdict === "PASS")) fail(`${c.id}: only PASS is verified`);
+      // The verdict has to follow from the outcomes and the run state the report itself holds. The reporter checks the same
+      // when it builds a report, and this keeps a stored report from being edited into a better verdict that still adds up.
+      const run = c.run;
+      if (run && c.verdict) {
+        const again = calculateVerdict({
+          expectedCount: run.outcomes.length + run.not_reached.length,
+          outcomes: run.outcomes.map((o) => ({ expected_ref: o.expected_ref, outcome: o.outcome })),
+          runState: {
+            infrastructureFailure: run.run_state.infrastructure_failure,
+            guardrailBlock: run.run_state.guardrail_block,
+            actorStopReason: run.run_state.actor_stop_reason,
+            runnerStopReason: run.run_state.runner_stop_reason,
+          },
+        });
+        if (again.verdict !== c.verdict || again.row !== c.verdict_row) fail(`${c.id}: the verdict ${c.verdict} (row ${c.verdict_row}) does not follow from the outcomes and run state in the report, which give ${again.verdict} (row ${again.row})`);
+        if (c.verdict === "PASS" && run.outcomes.some((o) => o.evidence.length === 0)) fail(`${c.id}: PASS, but an expected result has no evidence`);
+      }
     }
   });
 export type Report = z.infer<typeof ReportSchema>;

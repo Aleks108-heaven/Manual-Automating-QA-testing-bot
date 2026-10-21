@@ -50,6 +50,13 @@ export function exportScript(input: ExportInput): ExportResult {
     if (run.case.steps_total !== testCase.steps.length || run.steps.length !== testCase.steps.length) {
       reasons.push(`${label} does not have the ${testCase.steps.length} steps of the case`);
     }
+    // The record does not hold the case file's hash, so the run is matched to the case by what it did hold: the text of the
+    // steps, the expected results and the role. A run of an older version of the case must not be frozen under today's case hash.
+    const sameSteps = stableJson(run.steps.map((s) => s.text)) === stableJson(testCase.steps);
+    const sameExpected = stableJson(run.case.expected) === stableJson(testCase.expected.map((e) => ({ id: e.id, kind: e.kind, after_step: e.after_step, description: e.description })));
+    if (!sameSteps || !sameExpected || run.session.role !== testCase.role) {
+      reasons.push(`${label} was made with another version of the case (its steps, expected results or role differ from the case file now), so it does not show that this case is stable`);
+    }
     if (run.steps.some((s) => s.actions.some((a) => !a.ok))) {
       reasons.push(`${label} had a tool call that failed, so the case is not yet stable (a script would have to guess which attempt to keep)`);
     }
