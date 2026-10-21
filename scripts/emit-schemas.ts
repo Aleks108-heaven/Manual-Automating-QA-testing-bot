@@ -5,6 +5,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { z } from "zod";
+import { FrozenRegisterSchema, FrozenScriptSchema, ProposalSchema } from "../src/frozen/schema.ts";
 import { RegisterSchema, ReleaseReportSchema } from "../src/release/schema.ts";
 import { ReportSchema } from "../src/report/schema.ts";
 import { CaseSchema } from "../src/schemas/case.ts";
@@ -18,6 +19,10 @@ export const SCHEMA_FILES: ReadonlyArray<{ path: string; build: () => string }> 
   // The register is written by a person (the approver), so its schema describes what may be written.
   { path: "schemas/register.schema.json", build: () => json(z.toJSONSchema(RegisterSchema, { io: "input" })) },
   { path: "schemas/release-report.schema.json", build: () => json(z.toJSONSchema(ReleaseReportSchema)) },
+  // Frozen scripts (M7): the script, the register of approved scripts (written by an approver), and a proposal.
+  { path: "schemas/frozen-script.schema.json", build: () => json(z.toJSONSchema(FrozenScriptSchema)) },
+  { path: "schemas/frozen-register.schema.json", build: () => json(z.toJSONSchema(FrozenRegisterSchema, { io: "input" })) },
+  { path: "schemas/frozen-proposal.schema.json", build: () => json(z.toJSONSchema(ProposalSchema)) },
 ];
 
 export const REPORT_SCHEMA_PATH = "schemas/report.schema.json";

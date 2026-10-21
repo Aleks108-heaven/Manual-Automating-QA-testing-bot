@@ -29,7 +29,7 @@ export interface PlanEntry {
 
 export type LoadedRun = { path: string; runDir: string } & ({ record: RunRecord } | { error: string });
 
-const SUPPORTED_VERSION = 5;
+const SUPPORTED_VERSION = 6;
 
 /** Reads one run record from a run directory or a run.json path. A record it cannot read becomes an error, never a guess. */
 export function loadRun(path: string): LoadedRun {
@@ -174,6 +174,17 @@ function attentionFor(priority: string | null, verdict: Verdict | null, record: 
   if (record.cleanup_errors.length > 0) list.push({ kind: "cleanup_failed", message: "Cleanup failed. It does not change the verdict, and the staging owner removes the leftovers." });
   if (!record.model_output.valid && record.model_output.attempts > 0) list.push({ kind: "model_report_invalid", message: "The model's final report stayed invalid, so a maintainer should check the bot's output." });
   if (!record.versions.browser_sandbox) list.push({ kind: "sandbox_off", message: "The browser sandbox was off. That is acceptable only inside an isolating container." });
+  if (record.frozen && record.frozen.reengagement !== "not_needed") {
+    list.push({
+      kind: "frozen_step_could_not_run",
+      message:
+        record.frozen.reengagement === "proposal_written"
+          ? "A step of the frozen script could not run. The agent was asked only to propose a change, and it wrote one. A person decides whether to approve it. It did not change this verdict."
+          : record.frozen.reengagement === "proposal_invalid"
+            ? "A step of the frozen script could not run. The agent was asked to propose a change and gave no valid proposal. A person must look at the script. It did not change this verdict."
+            : "A step of the frozen script could not run, and no proposer was configured. A person must look at the script.",
+    });
+  }
   return list;
 }
 
@@ -232,6 +243,7 @@ function runView(record: RunRecord, runDir: string): RunView {
     model_output: record.model_output,
     run_state: record.run_state,
     implicit: record.implicit,
+    frozen: record.frozen,
     steps_total: record.case.steps_total,
     steps: record.steps.map((s) => ({
       index: s.index,

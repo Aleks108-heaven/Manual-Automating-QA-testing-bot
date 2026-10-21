@@ -4,15 +4,15 @@ Every duty has a named owner and a backup, and one person can pause the bot at a
 
 | Role | Responsible for | Name | Backup |
 | --- | --- | --- | --- |
-| Program owner | Scope, stage changes, risk acceptance | [to fill] | [to fill] |
-| Bot maintainer | Prompts, tools, runner, upgrades, golden set | [to fill] | [to fill] |
-| Triager (rotating) | Reviews every FAIL, BLOCKED, INCONCLUSIVE, INCOMPLETE | [to fill] | [to fill] |
-| Case curators (QA) | Write and maintain bot-ready cases | [to fill] | [to fill] |
-| Security reviewer | Runner threat model, injection tests, findings | [to fill] | [to fill] |
-| Approver | Auto-fixes, quarantines, verdict overrides | [to fill] | [to fill] |
-| Budget owner | Spend caps and forecast | [to fill] | [to fill] |
-| Staging owner | Environment access and shared-environment agreements | [to fill] | [to fill] |
-| Kill-switch holder | Pauses the runner and revokes its credentials | [to fill] | [to fill] |
+| Program owner | Scope, stage changes, risk acceptance | Odin (placeholder for testing) | [to fill] |
+| Bot maintainer | Prompts, tools, runner, upgrades, golden set | Odin (placeholder for testing) | [to fill] |
+| Triager (rotating) | Reviews every FAIL, BLOCKED, INCONCLUSIVE, INCOMPLETE | Odin (placeholder for testing) | [to fill] |
+| Case curators (QA) | Write and maintain bot-ready cases | Odin (placeholder for testing) | [to fill] |
+| Security reviewer | Runner threat model, injection tests, findings | Odin (placeholder for testing) | [to fill] |
+| Approver | Auto-fixes, quarantines, verdict overrides | Odin (placeholder for testing) | [to fill] |
+| Budget owner | Spend caps and forecast | Odin (placeholder for testing) | [to fill] |
+| Staging owner | Environment access and shared-environment agreements | Odin (placeholder for testing) | [to fill] |
+| Kill-switch holder | Pauses the runner and revokes its credentials | Odin (placeholder for testing) | [to fill] |
 
 One person may hold several roles, but no role may be unowned and the maintainer should not be the only PASS auditor.
 
@@ -24,7 +24,7 @@ One person may hold several roles, but no role may be unowned and the maintainer
 - Overriding a bot FAIL: the approver, with a recorded triage result and the evidence attached. Every override is logged and reviewed monthly.
 - Quarantining a case: the approver, with a named owner and a deadline.
 - Pausing the bot: the kill-switch holder or the program owner, with no approval needed. Resuming needs a completed review, a verified fix, and a clean run (a clean pre-flight report and a clean golden-set report, both newer than the pause).
-- Release go or no-go: [to fill: the existing release decision-maker]. A bot PASS is evidence for that decision, never the decision.
+- Release go or no-go: Odin (placeholder for testing; replace with the existing release decision-maker). A bot PASS is evidence for that decision, never the decision.
 
 **Escalation**
 

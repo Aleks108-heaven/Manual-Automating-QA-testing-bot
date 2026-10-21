@@ -69,6 +69,16 @@ export function formatCase(c: CaseEntry): string[] {
   line(`Target   ${r.target}  build ${r.build ?? "unknown"}`);
   line(`Versions model ${r.versions.model_id}${r.versions.model_live ? "" : " (scripted)"} via client ${r.versions.model_client}, Playwright ${r.versions.playwright}, browser ${r.versions.browser}`);
   if (!r.versions.browser_sandbox) line("WARNING  the browser sandbox was OFF for this run. Use that only inside an isolating container.");
+  if (r.frozen) {
+    const f = r.frozen;
+    const again = {
+      not_needed: "every script step ran",
+      not_requested: "a script step could not run and no proposer was configured",
+      proposal_written: `a script step could not run, so the agent was asked only to propose a change (${f.proposal_file ?? "no file"}); a person decides, and the verdict does not depend on it`,
+      proposal_invalid: `a script step could not run and the agent gave no valid proposal after ${f.proposal_attempts} attempt(s)`,
+    }[f.reengagement];
+    line(`Script   frozen script ${f.case_id} version ${f.script_version}, hash ${f.script_hash.slice(0, 12)}, case hash ${f.case_hash.slice(0, 12)}; no model was called; ${again}`);
+  }
   const b = r.budget;
   line(`Budget   ${b.used.tool_calls} of ${b.limits.max_tool_calls_per_run} tool calls, ${(b.used.wall_ms / 1000).toFixed(1)} s of ${b.limits.max_wall_ms / 1000} s, cost ${b.used.cost_usd.toFixed(4)} of ${b.limits.max_cost_usd} USD`);
   line(`Session  role ${r.session.role}${r.session.role === "none" ? " (no login)" : ", signed in by the runner"}`);

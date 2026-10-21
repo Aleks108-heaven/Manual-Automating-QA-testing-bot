@@ -55,7 +55,7 @@ const StepViewSchema = z.strictObject({
 });
 
 const AttentionSchema = z.strictObject({
-  kind: z.enum(["p1_not_pass", "guardrail_block", "injection_suspected", "scrubber_finding", "cleanup_failed", "model_report_invalid", "sandbox_off", "run_record_rejected"]),
+  kind: z.enum(["p1_not_pass", "guardrail_block", "injection_suspected", "scrubber_finding", "cleanup_failed", "model_report_invalid", "sandbox_off", "frozen_step_could_not_run", "run_record_rejected"]),
   /** Who the manual says should look at it, and why. */
   message: z.string(),
 });
@@ -102,6 +102,8 @@ const RunViewSchema = z.strictObject({
   model_output: record.model_output,
   run_state: record.run_state,
   implicit: record.implicit,
+  /** Set when the run replayed an approved frozen script: which one (version and hash) and whether a step could not run. */
+  frozen: record.frozen,
   steps_total: z.number().int().min(1),
   steps: z.array(StepViewSchema),
   outcomes: z.array(OutcomeRecordSchema),

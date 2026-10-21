@@ -9,6 +9,7 @@
 //   node src/cli.ts eval mutants [--sample N] [--repeat R]
 //   node src/cli.ts eval injection [--runs N]
 //   node src/cli.ts golden [--for-resume] | golden rehash
+//   node src/cli.ts frozen freeze | approve | approve-proposal | run
 //
 // Every run starts with the pre-flight check and refuses to start if the kill switch is engaged. A run ends with a
 // report (src/report/). After a refusal the rest of a batch does not start, and the report lists those cases as not executed.
@@ -41,12 +42,21 @@ import { newReleaseId, newReportId, writeRelease, writeReport } from "./report/w
 import { buildRelease, loadInventory, loadRegister, ReleaseError } from "./release/build.ts";
 import { formatRelease } from "./release/format.ts";
 import { ReportSchema } from "./report/schema.ts";
+import { exportScript } from "./frozen/export.ts";
+import { ScriptedProposer } from "./frozen/propose.ts";
+import { FrozenScriptModel } from "./frozen/replay.ts";
+import { FrozenScriptSchema, hashText } from "./frozen/schema.ts";
+import { approveProposal, approveScript, FrozenError, loadApprovedScript, loadFrozenRegister, nextVersion, readProposal, writeDraft } from "./frozen/store.ts";
 import { startOutsideServer } from "../fixtures/outside-server.ts";
 import { assertKnownDefects, startFixtureSite, type FixtureSite } from "../fixtures/site/server.ts";
 
 const USAGE = `Usage: node src/cli.ts run <case.yaml>... [options]
        node src/cli.ts report <run directory or run.json>... [--plan a.yaml,b.yaml]
        node src/cli.ts release <report.json or report directory> [--register <file>] [--cases-dir <dir>] [--today YYYY-MM-DD]
+       node src/cli.ts frozen freeze <case.yaml> <run directory>...
+       node src/cli.ts frozen approve <draft.json> --by <name>
+       node src/cli.ts frozen approve-proposal <proposal.json> --by <name>
+       node src/cli.ts frozen run <case.yaml> [--proposal-script <file>] [--defects a,b] [--target <url>]
        node src/cli.ts preflight [--cases a.yaml,b.yaml] [--out <file>] [--for-resume]
        node src/cli.ts eval mutants [--sample N] [--repeat R] [--out-dir <dir>]
        node src/cli.ts eval injection [--runs N] [--out-dir <dir>]
@@ -316,6 +326,144 @@ function releaseCommand(reportPath: string | undefined, values: { register?: str
   }
 }
 
+/**
+ * Frozen scripts. `freeze` writes a draft from run records, `approve` and `approve-proposal` are what a configured approver does
+ * (nothing else makes a script runnable), and `run` replays an approved script with no model. A script that is not approved,
+ * or whose file or case has changed, does not run, and the report lists the case as not executed.
+ */
+async function frozenCommand(action: string | undefined, args: string[], values: { by?: string; today?: string; "proposal-script"?: string; defects?: string; target?: string }): Promise<number> {
+  const config = loadConfig();
+  const today = values.today ?? new Date().toISOString().slice(0, 10);
+  const caseFileFor = (id: string) => join(config.release.casesDirectory, `${id}.yaml`);
+  try {
+    if (action === "freeze") {
+      const [casePath, ...runPaths] = args;
+      if (!casePath || runPaths.length === 0) return usage("Expected: frozen freeze <case.yaml> <run directory>...");
+      const testCase = loadCase(casePath);
+      const runs = runPaths.map((p) => {
+        const loaded = loadRun(p);
+        if (!("record" in loaded)) throw new FrozenError(`the run at ${p} could not be read: ${loaded.error}`);
+        return loaded.record;
+      });
+      const result = exportScript({
+        runs,
+        testCase,
+        caseHash: hashText(readFileSync(casePath, "utf8")),
+        minPassingRuns: config.frozen.minPassingRuns,
+        version: nextVersion(loadFrozenRegister(config.frozen.registerFile), testCase.id),
+        now: new Date().toISOString(),
+      });
+      if (!result.ok) {
+        console.error(`${testCase.id} was not frozen:\n${result.reasons.map((r) => `  - ${r}`).join("\n")}`);
+        return 2;
+      }
+      const draft = writeDraft(config, result.script);
+      console.log(`Draft script for ${testCase.id}, version ${result.script.version}: ${draft}`);
+      console.log(`It cannot run yet. A person reads it, and an approver runs: node src/cli.ts frozen approve ${draft} --by <name>`);
+      if (!result.script.source.live_model) console.log("Note: the proving runs used a scripted fake, not a language model. The script tests the machinery.");
+      return 0;
+    }
+    if (action === "approve") {
+      const [draftPath] = args;
+      if (!draftPath) return usage("Expected: frozen approve <draft.json> --by <name>");
+      const script = FrozenScriptSchema.parse(JSON.parse(readFileSync(draftPath, "utf8")));
+      const entry = approveScript({
+        config,
+        script,
+        caseText: readFileSync(caseFileFor(script.case_id), "utf8"),
+        by: values.by ?? "",
+        today,
+        reason: script.version === 1 ? "first freeze, approved by a person" : "changed script, approved by a person",
+      });
+      console.log(`Approved ${entry.case_id} version ${entry.version} as ${entry.file} (hash ${entry.script_hash.slice(0, 12)}) by ${entry.approved_by} on ${entry.approved_on}.`);
+      return 0;
+    }
+    if (action === "approve-proposal") {
+      const [proposalPath] = args;
+      if (!proposalPath) return usage("Expected: frozen approve-proposal <proposal.json> --by <name>");
+      const proposal = readProposal(proposalPath);
+      const caseText = readFileSync(caseFileFor(proposal.case_id), "utf8");
+      const entry = approveProposal({ config, proposal, caseText, stepsInCase: loadCase(caseFileFor(proposal.case_id)).steps.length, by: values.by ?? "", today });
+      console.log(`Approved the proposal as ${entry.case_id} version ${entry.version}: ${entry.file} (hash ${entry.script_hash.slice(0, 12)}) by ${entry.approved_by}. Run the case again to see whether the new script holds.`);
+      return 0;
+    }
+    if (action === "run") return await frozenRun(args[0], values, config);
+  } catch (error) {
+    if (error instanceof FrozenError) {
+      console.error(error.message);
+      return 3;
+    }
+    if (error instanceof CaseValidationError) {
+      console.error(error.message);
+      return 64;
+    }
+    throw error;
+  }
+  return usage("Expected: frozen freeze | approve | approve-proposal | run");
+}
+
+async function frozenRun(casePath: string | undefined, values: { "proposal-script"?: string; defects?: string; target?: string }, config: ReturnType<typeof loadConfig>): Promise<number> {
+  if (!casePath) return usage("Expected: frozen run <case.yaml> [--proposal-script <file>] [--defects a,b]");
+  const testCase = loadCase(casePath);
+  const defects = (values.defects ?? "").split(",").map((d) => d.trim()).filter(Boolean);
+  try {
+    assertKnownDefects(defects);
+  } catch (error) {
+    usage((error as Error).message);
+  }
+  const plan: PlanEntry = { id: testCase.id, source: casePath, title: testCase.title, priority: testCase.priority };
+  let approved;
+  try {
+    approved = loadApprovedScript({ register: loadFrozenRegister(config.frozen.registerFile), caseId: testCase.id, caseText: readFileSync(casePath, "utf8"), stepsInCase: testCase.steps.length });
+  } catch (error) {
+    if (!(error instanceof FrozenError)) throw error;
+    // A script that must not run is reported as a case that did not run, like any other refusal.
+    emit(buildReport({ reportId: newReportId(), generatedAt: new Date().toISOString(), plan: [{ ...plan, notRunReason: error.message }], runs: [] }), config.runs.directory);
+    return 3;
+  }
+  const proposer = values["proposal-script"] !== undefined ? ScriptedProposer.fromFile(values["proposal-script"]) : undefined;
+  const { targetOrigin, site } = await resolveTarget(values.target, defects);
+  try {
+    let runDir: string | null = null;
+    let reason: string | null = null;
+    try {
+      const result = await orchestrateRun({
+        testCase,
+        caseSource: casePath,
+        targetOrigin,
+        config,
+        secrets: new StaticSecretStore(FIXTURE_SECRETS),
+        modelFor: (c) => (c.id === testCase.id ? new FrozenScriptModel(approved.script) : ScriptedModelClient.fromFile(`tests/ci/scripts/${c.id}.json`)),
+        provider: new ScriptedProviderStatus(),
+        killSwitch: new KillSwitch({ config, targetOrigin }),
+        frozen: { script: approved.script, scriptHash: approved.scriptHash, caseHash: approved.caseHash, ...(proposer ? { proposer } : {}) },
+      });
+      runDir = result.runDir;
+      printPreflight(result.preflight);
+    } catch (error) {
+      if (error instanceof PreflightFailedError) {
+        printPreflight(error.report);
+        reason = error.message;
+      } else if (error instanceof RunnerPausedError) {
+        reason = error.message;
+      } else {
+        throw error;
+      }
+    }
+    if (reason !== null) console.error(reason);
+    const report = buildReport({
+      reportId: newReportId(),
+      generatedAt: new Date().toISOString(),
+      plan: [reason !== null ? { ...plan, notRunReason: reason } : plan],
+      runs: runDir ? [loadRun(runDir)] : [],
+    });
+    emit(report, config.runs.directory);
+    return exitCodeFor(report);
+  } finally {
+    await site?.close();
+  }
+}
+
 /** Builds a report from run records already on disk, optionally against the plan that was meant to run. */
 function reportCommand(runPaths: string[], values: { plan?: string }): number {
   if (runPaths.length === 0) usage("Expected: report <run directory or run.json>... [--plan a.yaml,b.yaml]");
@@ -367,6 +515,7 @@ async function main(): Promise<number> {
       register: { type: "string" },
       "cases-dir": { type: "string" },
       today: { type: "string" },
+      "proposal-script": { type: "string" },
       out: { type: "string" },
       "for-resume": { type: "boolean", default: false },
       sample: { type: "string" },
@@ -383,6 +532,7 @@ async function main(): Promise<number> {
   if (command === "preflight") return preflightCommand(values);
   if (command === "eval") return evalCommand(casePath, values);
   if (command === "golden") return goldenCommand(casePath, values);
+  if (command === "frozen") return frozenCommand(casePath, positionals.slice(2), values);
   if (command === "report") return reportCommand(positionals.slice(1), values);
   if (command === "release") return releaseCommand(casePath, values);
   if (command !== "run" || !casePath) usage("Expected: run <case.yaml>..., report, preflight, or kill-switch status|engage|resume");

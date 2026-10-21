@@ -1,6 +1,6 @@
 # QA Automation Bot Manual
 
-Version 0.12 (draft), 21 Oct 2026. Runbooks: [dependency and browser updates](../runbooks/updates.md), [the container runner](../runbooks/container-runner.md), [the kill switch](../runbooks/kill-switch.md), [the pre-flight check](../runbooks/preflight.md), [the golden set](../runbooks/golden-set.md). Each page below is a file in this folder. The Definitions page is the single source for verdicts, precedence, and terms. The prompts are in [prompts/](../../prompts/), and the build plan is in [build-brief.md](../build-brief.md).
+Version 0.13 (draft), 21 Oct 2026. Runbooks: [dependency and browser updates](../runbooks/updates.md), [the container runner](../runbooks/container-runner.md), [the kill switch](../runbooks/kill-switch.md), [the pre-flight check](../runbooks/preflight.md), [the golden set](../runbooks/golden-set.md), [frozen scripts](../runbooks/frozen-scripts.md). Each page below is a file in this folder. The Definitions page is the single source for verdicts, precedence, and terms. The prompts are in [prompts/](../../prompts/), and the build plan is in [build-brief.md](../build-brief.md).
 
 1. [Document control](01-document-control.md)
 2. [Quick start](02-quick-start.md)

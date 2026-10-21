@@ -19,8 +19,11 @@ import { EnvSecretStore, parseSecretRef, type SecretStore } from "../secrets/sto
 import { establishSession, SessionError, type EstablishedSession } from "../sessions/session-setup.ts";
 import type { Call, TestCase } from "../schemas/case.ts";
 import type { ActorOutput } from "../schemas/actor.ts";
-import { RunRecordSchema, type RunRecord } from "../schemas/run-record.ts";
+import { RunRecordSchema, type FrozenStamp, type RunRecord } from "../schemas/run-record.ts";
 import { ToolLayer, type RunnerAccess, type SharedBrowser } from "../tools/tool-layer.ts";
+import { requestProposal, type Proposer } from "../frozen/propose.ts";
+import type { FrozenScript } from "../frozen/schema.ts";
+import { writeProposal } from "../frozen/store.ts";
 import { calculateVerdict } from "../verdict/calculate.ts";
 
 export interface HealthProbe {
@@ -58,6 +61,11 @@ export interface RunOptions {
   preflight?: PreflightReport;
   /** A browser shared with other runs (the eval suites). Each run still gets its own context. */
   sharedBrowser?: SharedBrowser;
+  /**
+   * Set when the run replays an approved frozen script. `model` must then be that script's FrozenScriptModel. The proposer is
+   * asked only when a script step cannot run, and only for a proposal that a person may approve. It never changes the verdict.
+   */
+  frozen?: { script: FrozenScript; scriptHash: string; caseHash: string; proposer?: Proposer };
 }
 
 export interface RunResult {
@@ -119,6 +127,9 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
   let blocked: RunRecord["blocked"] = null;
   let implicit: ImplicitCollector | null = null;
   let modelOutput: { attempts: number; valid: boolean; errors: string[] } = { attempts: 0, valid: false, errors: [] };
+  let reengagement: FrozenStamp["reengagement"] = "not_needed";
+  let proposalFile: string | null = null;
+  const proposalStats = { attempts: 0, errors: [] as string[] };
   // The raw HAR holds cookies and request bodies. It lives here, outside the run directory, until it is scrubbed.
   const harScratchDir = join(config.sessions.directory, `${runId}-har`);
 
@@ -213,6 +224,56 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
         };
       }
 
+      // A frozen script step that could not run is the only reason to ask an agent anything. A failed assertion is a MISMATCH,
+      // which is a FAIL (precedence row 3), and it never gets here: only a step whose tool call failed has a failure to diagnose.
+      const failedAction = blocked ? [...(loop.steps[blocked.step - 1]?.actions ?? [])].reverse().find((a) => !a.ok) : undefined;
+      if (options.frozen && blocked && failedAction) {
+        if (!options.frozen.proposer) {
+          reengagement = "not_requested";
+        } else {
+          const step = blocked.step;
+          const snapshot = await tools.call("snapshot", {});
+          const asked = await requestProposal({
+            proposer: options.frozen.proposer,
+            request: {
+              testCase,
+              script: options.frozen.script,
+              step,
+              stepText: blocked.step_text,
+              failed: { tool: failedAction.tool, args: redactor.scrubJson(failedAction.args) as Record<string, unknown>, error: redactor.scrubText(failedAction.error ?? "") },
+              snapshot: snapshot.ok ? String((snapshot.data as { snapshot?: unknown }).snapshot ?? "").slice(0, 20_000) : null,
+            },
+            maxAttempts: config.modelOutput.maxAttempts,
+            redactor,
+            charge: (usage) => {
+              guard.chargeUsage(usage);
+              return guard.check(0) === null;
+            },
+          }).catch((error: unknown) => ({ body: null, attempts: 1, errors: [redactor.scrubText(`the proposer failed: ${(error as Error).message}`)] }));
+          proposalStats.attempts = asked.attempts;
+          proposalStats.errors = asked.errors;
+          if (asked.body) {
+            proposalFile = writeProposal(
+              runDir,
+              redactor.scrubJson({
+                schema_version: 1,
+                status: "proposed",
+                case_id: testCase.id,
+                script_version: options.frozen.script.version,
+                script_hash: options.frozen.scriptHash,
+                run_id: runId,
+                proposed_by: { name: options.frozen.proposer.name, model_id: options.frozen.proposer.modelId, live: options.frozen.proposer.live },
+                failed: { step, step_text: blocked.step_text, tool: failedAction.tool, args: failedAction.args, error: failedAction.error ?? "" },
+                proposal: asked.body,
+              }) as Parameters<typeof writeProposal>[1],
+            );
+            reengagement = "proposal_written";
+          } else {
+            reengagement = "proposal_invalid";
+          }
+        }
+      }
+
       // A stop decided by the runner (the loop detector) leaves nothing for the model to report.
       if (loop.runnerStop === null && !loop.guardrailBlock && loop.stopSource !== "runner") {
         const final = await requestFinalOutput({ model, testCase, actorStop: loop.actorStop, guard, config, redactor });
@@ -275,7 +336,7 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
   });
 
   const record: RunRecord = RunRecordSchema.parse({
-    schema_version: 5,
+    schema_version: 6,
     run_id: runId,
     case: {
       id: testCase.id,
@@ -347,6 +408,18 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
       model_context: existsSync(join(runDir, "model-context.jsonl")) ? "model-context.jsonl" : null,
     },
     run_state: runState,
+    frozen: options.frozen
+      ? {
+          case_id: testCase.id,
+          script_version: options.frozen.script.version,
+          script_hash: options.frozen.scriptHash,
+          case_hash: options.frozen.caseHash,
+          reengagement,
+          proposal_file: proposalFile,
+          proposal_attempts: proposalStats.attempts,
+          proposal_errors: proposalStats.errors,
+        }
+      : null,
     verdict,
     verdict_row: row,
   });

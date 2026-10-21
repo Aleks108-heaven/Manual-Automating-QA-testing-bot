@@ -80,14 +80,36 @@ export const BudgetRecordSchema = z.strictObject({
 });
 export type BudgetRecord = z.infer<typeof BudgetRecordSchema>;
 
-// Run record, schema version 5. Version 5 adds a hash of the bot's own source. Version 4 (M6) added the stamps below.
+// How a run that replayed a frozen script (M7) got its script, and what happened when a step of it could not run.
+export const FrozenStampSchema = z.strictObject({
+  case_id: z.string().min(1),
+  script_version: z.number().int().min(1),
+  /** The hash the register holds for this script. The runner checked the file against it before the run. */
+  script_hash: z.string().regex(/^[0-9a-f]{64}$/),
+  /** The hash of the case file the script was frozen from. The runner checked the case against it before the run. */
+  case_hash: z.string().regex(/^[0-9a-f]{64}$/),
+  /**
+   * not_needed: every script step ran. A failed assertion is a FAIL and never leads to any of the others.
+   * not_requested: a step could not run and no proposer was configured.
+   * proposal_written / proposal_invalid: a step could not run and the agent was asked only to propose a change.
+   */
+  reengagement: z.enum(["not_needed", "not_requested", "proposal_written", "proposal_invalid"]),
+  /** The proposal file, relative to the run directory. A person approves it or not. The verdict does not depend on it. */
+  proposal_file: z.string().nullable(),
+  /** How often the proposer was asked, and why each rejected answer was rejected. Counts and rules, never values. */
+  proposal_attempts: z.number().int().min(0),
+  proposal_errors: z.array(z.string()),
+});
+export type FrozenStamp = z.infer<typeof FrozenStampSchema>;
+
+// Run record, schema version 6. Version 6 (M7) adds `frozen`. Version 5 adds a hash of the bot's own source. Version 4 (M6) added the stamps below.
 // Version 0 (M1) had no session, budget, redaction or scan sections (added in
 // version 1, M2). Version 2 (M3) added how the model's final report fared, and the judge, implicit-check and
 // blocked-step sections. Version 3 (M4) added the pre-flight summary. Version 4 (M6) adds the version stamps a report
 // needs to be reproducible (model ID, whether the model was live, axe-core, a configuration hash) and what the report
 // needs to know about the case (its expected results, step count and preconditions).
 export const RunRecordSchema = z.strictObject({
-  schema_version: z.literal(5),
+  schema_version: z.literal(6),
   run_id: z.string().min(1),
   case: z.strictObject({
     id: z.string(),
@@ -193,6 +215,8 @@ export const RunRecordSchema = z.strictObject({
   artifact_scan: z.strictObject({ files_scanned: z.number().int(), findings: z.number().int(), cleaned: z.boolean() }),
   artifacts: z.strictObject({ har: z.string().nullable(), model_context: z.string().nullable() }),
   run_state: RunStateSchema,
+  // Null for a run driven by an actor. Set for a run that replayed an approved frozen script, with no model call.
+  frozen: FrozenStampSchema.nullable(),
   verdict: VerdictSchema,
   verdict_row: z.number().int().min(1).max(7),
 });

@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "type": "number",
+      "const": 1
+    },
+    "case_id": {
+      "type": "string",
+      "pattern": "^TC-[A-Z]+-\\d{3}$"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "case_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "frozen_at": {
+      "type": "string"
+    },
+    "source": {
+      "type": "object",
+      "properties": {
+        "runs": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "run_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "model_live": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "run_id",
+              "model_live"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "live_model": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "runs",
+        "live_model"
+      ],
+      "additionalProperties": false
+    },
+    "steps": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "index": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "actions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "tool": {
+                  "type": "string",
+                  "enum": [
+                    "goto",
+                    "click",
+                    "fill",
+                    "fill_secret",
+                    "press",
+                    "wait_for"
+                  ]
+                },
+                "args": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                }
+              },
+              "required": [
+                "tool",
+                "args"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "index",
+          "actions"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "schema_version",
+    "case_id",
+    "version",
+    "case_hash",
+    "frozen_at",
+    "source",
+    "steps"
+  ],
+  "additionalProperties": false
+}

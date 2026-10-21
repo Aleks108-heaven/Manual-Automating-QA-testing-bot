@@ -10,7 +10,7 @@ import type { ProviderStatus } from "../preflight/provider.ts";
 import type { PreflightReport } from "../preflight/report.ts";
 import type { TestCase } from "../schemas/case.ts";
 import type { SecretStore } from "../secrets/store.ts";
-import { defaultBuildProbe, runCase, type BuildProbe, type RunResult } from "./run-case.ts";
+import { defaultBuildProbe, runCase, type BuildProbe, type RunOptions, type RunResult } from "./run-case.ts";
 
 /** Thrown when the pre-flight check has a failed check. The report says which. */
 export class PreflightFailedError extends Error {
@@ -34,6 +34,8 @@ export interface OrchestrateOptions {
   provider: ProviderStatus;
   killSwitch: KillSwitch;
   buildProbe?: BuildProbe;
+  /** Replay an approved frozen script. `modelFor` must give that script's FrozenScriptModel for the case. */
+  frozen?: NonNullable<RunOptions["frozen"]>;
 }
 
 /** Runs the pre-flight check for the given cases and writes its report. Does not start a run. */
@@ -87,6 +89,7 @@ export async function orchestrateRun(options: OrchestrateOptions): Promise<RunRe
     secrets: options.secrets,
     ...(options.judge ? { judge: options.judge } : {}),
     ...(options.buildProbe ? { buildProbe: options.buildProbe } : {}),
+    ...(options.frozen ? { frozen: options.frozen } : {}),
     pause: options.killSwitch,
     preflight,
   });

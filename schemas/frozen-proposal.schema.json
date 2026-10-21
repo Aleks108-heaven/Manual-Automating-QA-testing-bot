@@ -1,0 +1,149 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "type": "number",
+      "const": 1
+    },
+    "status": {
+      "type": "string",
+      "const": "proposed"
+    },
+    "case_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "script_version": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "script_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "proposed_by": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "model_id": {
+          "type": "string"
+        },
+        "live": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "model_id",
+        "live"
+      ],
+      "additionalProperties": false
+    },
+    "failed": {
+      "type": "object",
+      "properties": {
+        "step": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "step_text": {
+          "type": "string"
+        },
+        "tool": {
+          "type": "string"
+        },
+        "args": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "step",
+        "step_text",
+        "tool",
+        "args",
+        "error"
+      ],
+      "additionalProperties": false
+    },
+    "proposal": {
+      "type": "object",
+      "properties": {
+        "step": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "actions": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "tool": {
+                "type": "string",
+                "enum": [
+                  "goto",
+                  "click",
+                  "fill",
+                  "fill_secret",
+                  "press",
+                  "wait_for"
+                ]
+              },
+              "args": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              }
+            },
+            "required": [
+              "tool",
+              "args"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "step",
+        "actions",
+        "rationale"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "schema_version",
+    "status",
+    "case_id",
+    "script_version",
+    "script_hash",
+    "run_id",
+    "proposed_by",
+    "failed",
+    "proposal"
+  ],
+  "additionalProperties": false
+}

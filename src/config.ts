@@ -125,6 +125,16 @@ const ConfigSchema = z.strictObject({
     // Every case file here is part of the inventory the P1 check counts against.
     casesDirectory: z.string().min(1),
   }),
+  // Frozen scripts (manual: Purpose, "Hybrid path"; Guardrails, "Frozen scripts"). A person from release.approvers approves each one.
+  frozen: z.strictObject({
+    // Approved scripts live under here, and drafts (not yet approved, so they cannot run) under drafts/.
+    directory: z.string().min(1),
+    // Who approved which script hash. A script that is not here, or whose file no longer has the hash here, does not run.
+    registerFile: z.string().min(1),
+    // How many identical passing runs a case needs before it may be frozen. A provisional value: the manual's page on freezing
+    // cases (still to write) fixes the real one.
+    minPassingRuns: z.number().int().min(1),
+  }),
   // Headers sent with setup and teardown calls to the application's test API (fixture only in M1).
   testApi: z.strictObject({ headers: z.record(z.string(), z.string()) }),
   runs: z.strictObject({ directory: z.string().min(1) }),
@@ -195,6 +205,8 @@ export function configHash(config: Config): string {
  *   QA_REQUIRE_CANARIES=0       do not fail the pre-flight check when no canary case is configured
  *   QA_RUNNER_IMAGE_DIGEST      the digest of the container image the runner is in (set by the container script)
  *   QA_REQUIRE_CONTAINER=1      require the pinned container image in the pre-flight check
+ *   QA_RELEASE_APPROVERS        comma-separated approver names (release.approvers), for trying the approval steps without editing the file
+ *   QA_RELEASE_DECISION_MAKER   the release decision-maker's name (release.decisionMaker)
  */
 export function loadConfig(path = "config/default.json", env: NodeJS.ProcessEnv = process.env): Config {
   const config = ConfigSchema.parse(JSON.parse(readFileSync(path, "utf8")));
@@ -209,6 +221,9 @@ export function loadConfig(path = "config/default.json", env: NodeJS.ProcessEnv 
   if (env["QA_REQUIRE_CANARIES"] === "0") config.preflight.requireCanaries = false;
   if (env["QA_RUNNER_IMAGE_DIGEST"]) config.preflight.runnerImageDigest = env["QA_RUNNER_IMAGE_DIGEST"];
   if (env["QA_REQUIRE_CONTAINER"] === "1") config.preflight.requireContainer = true;
+  const approvers = (env["QA_RELEASE_APPROVERS"] ?? "").split(",").map((a) => a.trim()).filter(Boolean);
+  if (approvers.length > 0) config.release.approvers = approvers;
+  if (env["QA_RELEASE_DECISION_MAKER"]?.trim()) config.release.decisionMaker = env["QA_RELEASE_DECISION_MAKER"].trim();
   config.sessions.directory = config.sessions.directory.replace("${TMPDIR}", tmpdir());
   config.killSwitch.stateFile = config.killSwitch.stateFile.replace("${RUNS}", config.runs.directory);
   config.killSwitch.auditLog = config.killSwitch.auditLog.replace("${RUNS}", config.runs.directory);

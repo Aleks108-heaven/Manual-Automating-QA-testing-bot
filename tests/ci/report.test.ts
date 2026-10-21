@@ -470,7 +470,7 @@ describe("the stored report and its contract", () => {
   });
 
   it("the committed JSON schemas (case, run record, report) are the ones the code produces", () => {
-    expect(SCHEMA_FILES.map((f) => f.path)).toEqual(["schemas/case.schema.json", "schemas/run-record.schema.json", REPORT_SCHEMA_PATH, "schemas/register.schema.json", "schemas/release-report.schema.json"]);
+    expect(SCHEMA_FILES.map((f) => f.path)).toEqual(["schemas/case.schema.json", "schemas/run-record.schema.json", REPORT_SCHEMA_PATH, "schemas/register.schema.json", "schemas/release-report.schema.json", "schemas/frozen-script.schema.json", "schemas/frozen-register.schema.json", "schemas/frozen-proposal.schema.json"]);
     for (const file of SCHEMA_FILES) {
       // Git may check the file out with CRLF line endings on Windows. The content is what has to match.
       expect(readFileSync(file.path, "utf8").replaceAll("\r\n", "\n"), file.path).toBe(file.build());

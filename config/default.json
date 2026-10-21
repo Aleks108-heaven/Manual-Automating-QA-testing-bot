@@ -87,6 +87,11 @@
     "registerFile": "release/register.json",
     "casesDirectory": "cases"
   },
+  "frozen": {
+    "directory": "frozen",
+    "registerFile": "frozen/register.json",
+    "minPassingRuns": 3
+  },
   "testApi": {
     "headers": { "x-fixture-test": "1" }
   },
