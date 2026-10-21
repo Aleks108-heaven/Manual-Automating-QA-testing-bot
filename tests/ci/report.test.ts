@@ -424,7 +424,8 @@ describe("the stored report and its contract", () => {
   });
 
   it("the committed JSON schema is the one the code produces", () => {
-    expect(readFileSync(REPORT_SCHEMA_PATH, "utf8")).toBe(reportJsonSchema());
+    // Git may check the file out with CRLF line endings on Windows. The content is what has to match.
+    expect(readFileSync(REPORT_SCHEMA_PATH, "utf8").replaceAll("\r\n", "\n")).toBe(reportJsonSchema());
   });
 });
 
