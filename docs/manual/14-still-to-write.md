@@ -5,7 +5,7 @@ Fourteen pages remain: one is needed before the pilot-readiness review, nine bef
 | Page | Needed by | Must contain |
 | --- | --- | --- |
 | Architecture and data flow | Pilot-readiness review | Components, tool list with permissions, oracle layers, evidence store, version map, and a data-flow diagram showing what data goes where |
-| Release-decision policy and report format | Gating | How verdicts feed go or no-go, report fields, override logging, the "executed X of Y" wording |
+| Release-decision policy and report format | Gating | How verdicts feed go or no-go, report fields, override logging, the "executed X of Y" wording. The report fields, the summary wording, and the quarantine and override records are built and described on the Reading results page. What remains is the policy: what the decision-maker requires of that evidence |
 | PASS audit procedure | Gating | Sampling (risk-weighted plus a random slice), blind review, cause classification, escalation |
 | Change management and drift | Gating | How to change prompts, tools, rubric, model, or browser; golden-set runs; shadow mode; version stamping; rollback |
 | Freezing cases into scripts (hybrid path) | Gating | Freeze criteria, script export from the run record's replayable actions, versioning, human approval of script changes, the re-engagement rules from the Purpose page (a failed assertion stays FAIL), and how frozen scripts serve as the second rung of the fallback ladder |

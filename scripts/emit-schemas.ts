@@ -5,6 +5,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { z } from "zod";
+import { RegisterSchema, ReleaseReportSchema } from "../src/release/schema.ts";
 import { ReportSchema } from "../src/report/schema.ts";
 import { CaseSchema } from "../src/schemas/case.ts";
 import { RunRecordSchema } from "../src/schemas/run-record.ts";
@@ -14,6 +15,9 @@ export const SCHEMA_FILES: ReadonlyArray<{ path: string; build: () => string }> 
   { path: "schemas/case.schema.json", build: () => json(z.toJSONSchema(CaseSchema, { io: "input" })) },
   { path: "schemas/run-record.schema.json", build: () => json(z.toJSONSchema(RunRecordSchema)) },
   { path: "schemas/report.schema.json", build: () => json(z.toJSONSchema(ReportSchema)) },
+  // The register is written by a person (the approver), so its schema describes what may be written.
+  { path: "schemas/register.schema.json", build: () => json(z.toJSONSchema(RegisterSchema, { io: "input" })) },
+  { path: "schemas/release-report.schema.json", build: () => json(z.toJSONSchema(ReleaseReportSchema)) },
 ];
 
 export const REPORT_SCHEMA_PATH = "schemas/report.schema.json";

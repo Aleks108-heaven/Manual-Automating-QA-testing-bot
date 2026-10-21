@@ -19,6 +19,14 @@ Every FAIL, BLOCKED, INCONCLUSIVE, and INCOMPLETE result goes to a person, and o
 - **Trace.** No Playwright trace is recorded, because a trace cannot be scrubbed. The report links the scrubbed network log instead.
 - **Who is told.** A P1 case that is not PASS (even one that never ran), a guardrail block, an injection report, a credential found by the final scan, a failed cleanup, an invalid model report, a browser sandbox that was off, and a rejected run record are each listed under "Needs a person".
 
+**Release report.** The command `release` adds three things to a run report: the inventory of P1 cases (every case file in the configured case directory), the register of quarantines and overrides (a JSON file, kept as a decision record), and the names of the approvers and the release decision-maker (both `[to fill]` in the manual, read from configuration). It states whether the evidence for the release decision is complete. It never states the decision, because a bot PASS is evidence for that decision and never the decision (Roles and decision rights).
+
+- **Complete evidence** means every P1 case in the inventory is PASS, quarantined or overridden, none is missing from the run, the runs saw one build, no version stamp is missing, nothing is wrong in the register or the inventory, and no quarantine is overdue. Evidence from a scripted model is never complete. The report lists why it is incomplete.
+- **Quarantine.** Only an approver may quarantine a case, with a named owner, a reason and a deadline. A quarantined case is out of gating, and every release report lists every quarantine with the case's verdict in the run. A quarantine past its deadline puts the case back in gating. The deadline day itself still counts.
+- **Override.** Only an approver may override a FAIL, with a triage result and evidence. An override names the run it is for, so it does not carry over to a later run, and the verdict stays FAIL in every report. Only a FAIL can be overridden. The register is read in full or not at all: an override without a triage result or evidence stops the report. Every override is listed, and overrides are reviewed monthly.
+- **Fail closed.** With no approver configured, every quarantine and override is invalid and is shown as invalid. A case file that does not validate is a fault, because it may be a P1 case the check cannot see.
+- **Not yet decided.** The release policy itself (what the decision-maker requires, and the gating stage's rules for sampling PASS results) stays on the Still to write page.
+
 **Triage.** Work through the decision tree below, in order, for every FAIL.
 
 ```mermaid

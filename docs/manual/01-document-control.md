@@ -4,7 +4,7 @@ This manual governs the QA automation bot from the pilot onward, and version 0.9
 
 | Field | Value |
 | --- | --- |
-| Manual version | 0.11 (draft) |
+| Manual version | 0.12 (draft) |
 | Status | Draft, revised after two AI design reviews. These are not the human independent review that stage changes and the pilot-readiness review require |
 | Applies to bot version | [to fill: release or commit] |
 | Manual owner | [to fill: name or role] |
@@ -30,5 +30,6 @@ Three rules keep the manual trustworthy. A bot change is not finished until this
 | 20 Oct 2026 | 0.9 | Milestone M5 built. The mutant eval, the golden set and the injection eval, as commands with reports and exact 95% bounds. `text_visible` gains `exact: true` after the mutant eval showed that a substring check misses a changed message. Definitions gain mutant, equivalent mutant and coverage gap. Resuming the kill switch also needs a clean golden-set report. A runbook for the golden set was added. The Pilot page says what scripted runs of these suites do and do not show | [to fill] |
 | 21 Oct 2026 | 0.10 | Milestone M6 built. The report is a view over the run records: header with version stamps, the summary line, per-case detail, and a draft bug report for a FAIL. The Reading results page says how X, Y and Z are counted (a case that did not run is not verified), that the reporter recomputes each verdict and refuses a record that disagrees with itself, and what a missing or mixed stamp means. The run record is schema version 4 (model ID, live or scripted, axe-core, configuration hash, and the case's expected results, step count and preconditions). A JSON Schema for the report was added | [to fill] |
 | 21 Oct 2026 | 0.11 | M6 follow-up after a first read. The summary names every kind of case that is not verified, because a case that ran and failed is not verified either. A negative control gets a bug draft marked as a control, and a person decides. A case file that does not validate no longer stops the batch: it counts as not executed and the rest runs. The header gains a hash of the bot's source files and lockfile, since the product code cannot ask git for a commit. JSON Schemas for the case and the run record were added next to the report's. The run record is schema version 5 | [to fill] |
+| 21 Oct 2026 | 0.12 | The release report. A run report plus the inventory of P1 cases and a register of quarantines and overrides says whether the evidence for the release decision is complete, and never makes the decision. Quarantines and overrides follow the rules already in the manual (only the approver, with an owner and deadline, or a triage result and evidence), and an override is tied to one run. Approver and decision-maker names come from configuration, and with none configured every quarantine and override is invalid. Evidence from a scripted model is never complete. The Still to write row now says only the policy remains | [to fill] |
 
 This log is append-only. Do not edit earlier entries.

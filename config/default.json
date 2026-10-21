@@ -81,6 +81,12 @@
     "mode": "per-case",
     "directory": "${TMPDIR}/qa-bot-sessions"
   },
+  "release": {
+    "approvers": [],
+    "decisionMaker": null,
+    "registerFile": "release/register.json",
+    "casesDirectory": "cases"
+  },
   "testApi": {
     "headers": { "x-fixture-test": "1" }
   },

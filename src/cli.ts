@@ -15,7 +15,7 @@
 // Exit codes: 0 every planned case is PASS, 1 any case is FAIL, 2 anything else that is not verified (BLOCKED,
 // INCONCLUSIVE, INCOMPLETE, or a case that did not run), 3 nothing ran because the run was refused (kill switch
 // engaged, or a pre-flight check failed), 64 usage error, 70 unexpected error.
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { CaseValidationError, loadCase } from "./cases/load.ts";
@@ -37,12 +37,16 @@ import type { TestCase } from "./schemas/case.ts";
 import { buildReport, loadRun, ReportError, type PlanEntry } from "./report/build.ts";
 import { formatReport } from "./report/format.ts";
 import type { Report } from "./report/schema.ts";
-import { newReportId, writeReport } from "./report/write.ts";
+import { newReleaseId, newReportId, writeRelease, writeReport } from "./report/write.ts";
+import { buildRelease, loadInventory, loadRegister, ReleaseError } from "./release/build.ts";
+import { formatRelease } from "./release/format.ts";
+import { ReportSchema } from "./report/schema.ts";
 import { startOutsideServer } from "../fixtures/outside-server.ts";
 import { assertKnownDefects, startFixtureSite, type FixtureSite } from "../fixtures/site/server.ts";
 
 const USAGE = `Usage: node src/cli.ts run <case.yaml>... [options]
        node src/cli.ts report <run directory or run.json>... [--plan a.yaml,b.yaml]
+       node src/cli.ts release <report.json or report directory> [--register <file>] [--cases-dir <dir>] [--today YYYY-MM-DD]
        node src/cli.ts preflight [--cases a.yaml,b.yaml] [--out <file>] [--for-resume]
        node src/cli.ts eval mutants [--sample N] [--repeat R] [--out-dir <dir>]
        node src/cli.ts eval injection [--runs N] [--out-dir <dir>]
@@ -275,6 +279,43 @@ async function runCommand(casePaths: string[], values: { script?: string; "judge
   }
 }
 
+/**
+ * The release report: a run report plus the register of quarantines and overrides and the inventory of P1 cases. It shows
+ * whether the evidence for the release decision is complete. It does not decide. Exit code 0 when the evidence is complete, 2 when not.
+ */
+function releaseCommand(reportPath: string | undefined, values: { register?: string; "cases-dir"?: string; today?: string }): number {
+  if (!reportPath) usage("Expected: release <report.json or report directory> [--register <file>] [--cases-dir <dir>] [--today YYYY-MM-DD]");
+  const config = loadConfig();
+  try {
+    const file = existsSync(reportPath) && statSync(reportPath).isDirectory() ? join(reportPath, "report.json") : reportPath;
+    if (!existsSync(file)) throw new ReleaseError(`there is no report at ${file}`);
+    const parsed = ReportSchema.safeParse(JSON.parse(readFileSync(file, "utf8")));
+    if (!parsed.success) throw new ReleaseError(`the report at ${file} is not a valid report: ${parsed.error.issues[0]?.message ?? "unknown"}`);
+    const inventory = loadInventory(values["cases-dir"] ?? config.release.casesDirectory);
+    const release = buildRelease({
+      releaseId: newReleaseId(),
+      generatedAt: new Date().toISOString(),
+      today: values.today ?? new Date().toISOString().slice(0, 10),
+      report: parsed.data,
+      register: loadRegister(values.register ?? config.release.registerFile),
+      inventory: inventory.entries,
+      inventoryProblems: inventory.problems,
+      approvers: config.release.approvers,
+      decisionMaker: config.release.decisionMaker,
+    });
+    const written = writeRelease(release, config.runs.directory);
+    console.log(formatRelease(release));
+    console.log(`Release report: ${written.json}`);
+    return release.evidence.status === "complete" ? 0 : 2;
+  } catch (error) {
+    if (error instanceof ReleaseError) {
+      console.error(error.message);
+      return 64;
+    }
+    throw error;
+  }
+}
+
 /** Builds a report from run records already on disk, optionally against the plan that was meant to run. */
 function reportCommand(runPaths: string[], values: { plan?: string }): number {
   if (runPaths.length === 0) usage("Expected: report <run directory or run.json>... [--plan a.yaml,b.yaml]");
@@ -323,6 +364,9 @@ async function main(): Promise<number> {
       "golden-report": { type: "string" },
       cases: { type: "string" },
       plan: { type: "string" },
+      register: { type: "string" },
+      "cases-dir": { type: "string" },
+      today: { type: "string" },
       out: { type: "string" },
       "for-resume": { type: "boolean", default: false },
       sample: { type: "string" },
@@ -340,6 +384,7 @@ async function main(): Promise<number> {
   if (command === "eval") return evalCommand(casePath, values);
   if (command === "golden") return goldenCommand(casePath, values);
   if (command === "report") return reportCommand(positionals.slice(1), values);
+  if (command === "release") return releaseCommand(casePath, values);
   if (command !== "run" || !casePath) usage("Expected: run <case.yaml>..., report, preflight, or kill-switch status|engage|resume");
   return runCommand(positionals.slice(1), values);
 }

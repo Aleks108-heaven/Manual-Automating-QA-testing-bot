@@ -4,11 +4,34 @@ import { join } from "node:path";
 import { Redactor } from "../redact/redactor.ts";
 import { scanArtifacts } from "../redact/scan.ts";
 import { formatReport } from "./format.ts";
+import { formatRelease } from "../release/format.ts";
+import { ReleaseReportSchema, type ReleaseReport } from "../release/schema.ts";
 import { ReportSchema, type Report } from "./schema.ts";
+
+/** Stores a release report as release.json and release.txt in <runsDir>/releases/<id>, after the same credential check. */
+export function writeRelease(release: ReleaseReport, runsDir: string): { dir: string; json: string; text: string } {
+  ReleaseReportSchema.parse(release);
+  const dir = join(runsDir, "releases", release.release_id);
+  mkdirSync(dir, { recursive: true });
+  const json = join(dir, "release.json");
+  const text = join(dir, "release.txt");
+  writeFileSync(json, JSON.stringify(release, null, 2));
+  writeFileSync(text, formatRelease(release));
+  const scan = scanArtifacts(dir, new Redactor());
+  if (scan.findings.length > 0) {
+    rmSync(dir, { recursive: true, force: true });
+    throw new Error(`a credential header was found in the release report (${scan.findings.map((f) => f.file).join(", ")}). It was not trusted and was removed.`);
+  }
+  return { dir, json, text };
+}
 
 export function newReportId(now: Date = new Date()): string {
   const stamp = now.toISOString().replace(/[-:]/g, "").replace(/\..*/, "").replace("T", "-");
   return `${stamp}-report-${randomBytes(2).toString("hex")}`;
+}
+
+export function newReleaseId(now: Date = new Date()): string {
+  return newReportId(now).replace("-report-", "-release-");
 }
 
 /**

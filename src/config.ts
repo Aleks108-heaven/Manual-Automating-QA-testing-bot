@@ -114,6 +114,17 @@ const ConfigSchema = z.strictObject({
     // Where session files live while a case runs. Outside the run directory, and removed afterwards.
     directory: z.string().min(1),
   }),
+  // The release report (manual: Reading results, "Release report"; Roles and decision rights). The names are [to fill] in the
+  // manual and come from here. With no approver listed, nobody may quarantine a case or override a FAIL.
+  release: z.strictObject({
+    approvers: z.array(z.string().min(1)),
+    // The existing release decision-maker. The bot never decides, and the report names who does.
+    decisionMaker: z.string().min(1).nullable(),
+    // Quarantines and overrides, kept as decision records.
+    registerFile: z.string().min(1),
+    // Every case file here is part of the inventory the P1 check counts against.
+    casesDirectory: z.string().min(1),
+  }),
   // Headers sent with setup and teardown calls to the application's test API (fixture only in M1).
   testApi: z.strictObject({ headers: z.record(z.string(), z.string()) }),
   runs: z.strictObject({ directory: z.string().min(1) }),

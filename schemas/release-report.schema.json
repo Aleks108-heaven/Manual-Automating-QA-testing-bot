@@ -1,0 +1,346 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "type": "number",
+      "const": 1
+    },
+    "release_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "generated_at": {
+      "type": "string"
+    },
+    "today": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+    },
+    "run_report_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "candidate_build": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "decision": {
+      "type": "object",
+      "properties": {
+        "made_by_bot": {
+          "type": "boolean",
+          "const": false
+        },
+        "decision_maker": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "made_by_bot",
+        "decision_maker",
+        "note"
+      ],
+      "additionalProperties": false
+    },
+    "evidence": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "complete",
+            "incomplete"
+          ]
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "p1": {
+          "type": "object",
+          "properties": {
+            "inventory": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "verified": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "quarantined": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "overridden": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "blocking": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "not_in_run": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "inventory",
+            "verified",
+            "quarantined",
+            "overridden",
+            "blocking",
+            "not_in_run"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "status",
+        "reasons",
+        "p1"
+      ],
+      "additionalProperties": false
+    },
+    "p1_cases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "verified",
+              "quarantined",
+              "overridden",
+              "blocking",
+              "not_in_run"
+            ]
+          },
+          "verdict": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "PASS",
+                  "FAIL",
+                  "BLOCKED",
+                  "INCONCLUSIVE",
+                  "INCOMPLETE"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "note": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "state",
+          "verdict",
+          "note"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "quarantines": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "case_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "owner": {
+            "type": "string",
+            "minLength": 1
+          },
+          "approver": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          },
+          "quarantined_on": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "deadline": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "overdue",
+              "invalid"
+            ]
+          },
+          "problem": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "verdict_in_run": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "PASS",
+                  "FAIL",
+                  "BLOCKED",
+                  "INCONCLUSIVE",
+                  "INCOMPLETE"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "case_id",
+          "owner",
+          "approver",
+          "reason",
+          "quarantined_on",
+          "deadline",
+          "status",
+          "problem",
+          "verdict_in_run"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "overrides": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "case_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "run_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "approver": {
+            "type": "string",
+            "minLength": 1
+          },
+          "triage_result": {
+            "type": "string",
+            "enum": [
+              "tool_or_agent_error",
+              "case_issue",
+              "environment",
+              "requirement_change",
+              "flaky_or_unexplained",
+              "app_defect"
+            ]
+          },
+          "evidence": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          },
+          "recorded_on": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "applied",
+              "invalid"
+            ]
+          },
+          "problem": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "case_id",
+          "run_id",
+          "approver",
+          "triage_result",
+          "evidence",
+          "reason",
+          "recorded_on",
+          "status",
+          "problem"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "problems": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "schema_version",
+    "release_id",
+    "generated_at",
+    "today",
+    "run_report_id",
+    "candidate_build",
+    "decision",
+    "evidence",
+    "p1_cases",
+    "quarantines",
+    "overrides",
+    "problems"
+  ],
+  "additionalProperties": false
+}
