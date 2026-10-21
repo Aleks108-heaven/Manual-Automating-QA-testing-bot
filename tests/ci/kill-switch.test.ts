@@ -213,6 +213,8 @@ describe("T11 pausing stops runs", () => {
   it("a model that never answers cannot keep a paused runner busy", async () => {
     class HungModel implements ModelClient {
       readonly name = "hung";
+      readonly modelId = "hung";
+      readonly live = false;
       nextAction(_context: ModelContext): Promise<ModelAction> {
         return new Promise(() => undefined);
       }

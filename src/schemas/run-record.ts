@@ -80,13 +80,24 @@ export const BudgetRecordSchema = z.strictObject({
 });
 export type BudgetRecord = z.infer<typeof BudgetRecordSchema>;
 
-// Run record, schema version 3 (M4). Version 0 (M1) had no session, budget, redaction or scan sections (added in
+// Run record, schema version 4 (M6). Version 0 (M1) had no session, budget, redaction or scan sections (added in
 // version 1, M2). Version 2 (M3) added how the model's final report fared, and the judge, implicit-check and
-// blocked-step sections. Version 3 (M4) adds the pre-flight summary.
+// blocked-step sections. Version 3 (M4) added the pre-flight summary. Version 4 (M6) adds the version stamps a report
+// needs to be reproducible (model ID, whether the model was live, axe-core, a configuration hash) and what the report
+// needs to know about the case (its expected results, step count and preconditions).
 export const RunRecordSchema = z.strictObject({
-  schema_version: z.literal(3),
+  schema_version: z.literal(4),
   run_id: z.string().min(1),
-  case: z.strictObject({ id: z.string(), title: z.string(), priority: z.string(), source: z.string() }),
+  case: z.strictObject({
+    id: z.string(),
+    title: z.string(),
+    priority: z.string(),
+    source: z.string(),
+    steps_total: z.number().int().min(1),
+    preconditions: z.array(z.string()),
+    // Every expected result of the case, so a result the run never reached can be named in the report.
+    expected: z.array(z.strictObject({ id: z.string().min(1), kind: z.string().min(1), after_step: z.number().int().min(1), description: z.string() })).min(1),
+  }),
   started_at: z.string(),
   finished_at: z.string(),
   target: z.string(),
@@ -94,11 +105,17 @@ export const RunRecordSchema = z.strictObject({
     bot: z.string(),
     node: z.string(),
     playwright: z.string(),
+    axe_core: z.string(),
     browser: z.string(),
     // false means the Chromium sandbox was off for this run. It is only acceptable inside an isolating container.
     browser_sandbox: z.boolean(),
     model_client: z.string(),
+    // The pinned model ID, and whether it was a language model at all (false for a scripted fake).
+    model_id: z.string().min(1),
+    model_live: z.boolean(),
     prompt_hashes: z.record(z.string(), z.string()),
+    // A fingerprint of the configuration, without machine-specific paths (see configHash).
+    config_hash: z.string().regex(/^[0-9a-f]{64}$/),
     build: z.string().nullable(),
   }),
   steps: z.array(StepRecordSchema),
@@ -158,6 +175,8 @@ export const RunRecordSchema = z.strictObject({
   judge: z.strictObject({
     configured: z.boolean(),
     name: z.string().nullable(),
+    model_id: z.string().nullable(),
+    live: z.boolean().nullable(),
     calls: z.number().int(),
     attempts: z.number().int(),
     errors: z.array(z.string()),

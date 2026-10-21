@@ -75,6 +75,8 @@ describe("T3 budget cutoffs are INCOMPLETE", () => {
   it("a time budget, when the model never answers", async () => {
     class HungModel implements ModelClient {
       readonly name = "hung";
+      readonly modelId = "hung";
+      readonly live = false;
       nextAction(_context: ModelContext): Promise<ModelAction> {
         return new Promise(() => undefined);
       }

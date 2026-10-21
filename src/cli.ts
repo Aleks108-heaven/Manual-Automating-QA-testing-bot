@@ -1,17 +1,20 @@
 // Command-line entry point. It runs cases against the local fixture site with a scripted fake model, so no API
 // key and no cost are involved.
 //
-//   node src/cli.ts run cases/TC-FORM-001.yaml [--script <file>] [--defects a,b]
+//   node src/cli.ts run cases/TC-FORM-001.yaml [more cases] [--script <file>] [--defects a,b]
 //                        [--negative-control] [--mutate <expected id>] [--target <url>]
+//   node src/cli.ts report <run directory or run.json>... [--plan a.yaml,b.yaml]
 //   node src/cli.ts preflight [--cases a.yaml,b.yaml] [--out <file>] [--target <url>]
 //   node src/cli.ts kill-switch status | engage | resume
 //   node src/cli.ts eval mutants [--sample N] [--repeat R]
 //   node src/cli.ts eval injection [--runs N]
 //   node src/cli.ts golden [--for-resume] | golden rehash
 //
-// Every run starts with the pre-flight check and refuses to start if the kill switch is engaged.
-// Exit codes: 0 PASS, 1 FAIL, 2 any other verdict (BLOCKED, INCONCLUSIVE, INCOMPLETE), 3 the run was refused
-// (kill switch engaged, or a pre-flight check failed), 64 usage error, 70 unexpected error.
+// Every run starts with the pre-flight check and refuses to start if the kill switch is engaged. A run ends with a
+// report (src/report/). After a refusal the rest of a batch does not start, and the report lists those cases as not executed.
+// Exit codes: 0 every planned case is PASS, 1 any case is FAIL, 2 anything else that is not verified (BLOCKED,
+// INCONCLUSIVE, INCOMPLETE, or a case that did not run), 3 nothing ran because the run was refused (kill switch
+// engaged, or a pre-flight check failed), 64 usage error, 70 unexpected error.
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
@@ -30,11 +33,16 @@ import type { PreflightReport } from "./preflight/report.ts";
 import { orchestrateRun, PreflightFailedError, preflightFor } from "./runner/orchestrate.ts";
 import { StaticSecretStore } from "./secrets/store.ts";
 import { FIXTURE_SECRETS } from "../fixtures/secrets.ts";
-import type { RunRecord } from "./schemas/run-record.ts";
+import type { TestCase } from "./schemas/case.ts";
+import { buildReport, loadRun, ReportError, type PlanEntry } from "./report/build.ts";
+import { formatReport } from "./report/format.ts";
+import type { Report } from "./report/schema.ts";
+import { newReportId, writeReport } from "./report/write.ts";
 import { startOutsideServer } from "../fixtures/outside-server.ts";
 import { assertKnownDefects, startFixtureSite, type FixtureSite } from "../fixtures/site/server.ts";
 
-const USAGE = `Usage: node src/cli.ts run <case.yaml> [options]
+const USAGE = `Usage: node src/cli.ts run <case.yaml>... [options]
+       node src/cli.ts report <run directory or run.json>... [--plan a.yaml,b.yaml]
        node src/cli.ts preflight [--cases a.yaml,b.yaml] [--out <file>] [--for-resume]
        node src/cli.ts eval mutants [--sample N] [--repeat R] [--out-dir <dir>]
        node src/cli.ts eval injection [--runs N] [--out-dir <dir>]
@@ -45,8 +53,9 @@ const USAGE = `Usage: node src/cli.ts run <case.yaml> [options]
        node src/cli.ts kill-switch resume --by <name> --review <ref> --fix <ref> --preflight-report <file> --golden-report <file>
 
 Options:
-  --script <file>        Scripted model actions (default: tests/ci/scripts/<case id>.json)
-  --judge-script <file>  Scripted judge answers, for cases with judged expected results
+  --script <file>        Scripted model actions (default: tests/ci/scripts/<case id>.json). One case only
+  --judge-script <file>  Scripted judge answers, for cases with judged expected results. One case only
+  --plan a.yaml,b.yaml   With report: the cases that were planned. A planned case with no run is reported as not executed
   --defects a,b          Turn on fixture defects, for example lockout-threshold=4 or message=email-invalid:add-period (see fixtures/defects.ts)
   --negative-control     Make one expected result wrong. The bot must report FAIL.
   --mutate <id>          With --negative-control, choose which expected result to make wrong
@@ -129,52 +138,166 @@ async function killSwitchCommand(action: string | undefined, v: { by?: string; r
   return usage("Expected: kill-switch status | engage | resume");
 }
 
-function printSummary(record: RunRecord, runDir: string, note: string | null): void {
-  const line = (text = "") => console.log(text);
-  line(`Case     ${record.case.id}  ${record.case.title}  (${record.case.priority})${note ? `  [${note}]` : ""}`);
-  line(`Run      ${record.run_id}`);
-  line(`Target   ${record.target}  build ${record.versions.build ?? "unknown"}`);
-  line(`Versions model client ${record.versions.model_client}, Playwright ${record.versions.playwright}, browser ${record.versions.browser}`);
-  if (!record.versions.browser_sandbox) line("WARNING  the browser sandbox was OFF for this run. Use that only inside an isolating container.");
-  const b = record.budget;
-  line(`Budget   ${b.used.tool_calls} of ${b.limits.max_tool_calls_per_run} tool calls, ${(b.used.wall_ms / 1000).toFixed(1)} s of ${b.limits.max_wall_ms / 1000} s, cost ${b.used.cost_usd.toFixed(4)} of ${b.limits.max_cost_usd} USD`);
-  line(`Session  role ${record.session.role}${record.session.role === "none" ? " (no login)" : ", signed in by the runner"}`);
-  line(`Secrets  ${record.redaction.secrets_tracked} tracked, ${record.redaction.replacements} replacements, artifact scan ${record.artifact_scan.findings === 0 ? "clean" : `FOUND ${record.artifact_scan.findings} (cleaned)`} over ${record.artifact_scan.files_scanned} files`);
-  line();
-  line(`Verdict: ${record.verdict}  (precedence row ${record.verdict_row})`);
-  for (const o of record.outcomes) {
-    line(`  ${o.expected_ref.padEnd(4)} ${o.outcome.padEnd(11)} ${o.expected}${o.outcome === "MATCH" ? "" : `   actual: ${o.actual ?? "n/a"}`}`);
+/**
+ * The exit code for a report. 0 only when every planned case is PASS. 1 when any case is FAIL. 3 when nothing was
+ * executed (the run was refused). 2 for anything else that is not verified.
+ */
+function exitCodeFor(report: Report): number {
+  if (report.summary.executed === 0) return 3;
+  if (report.summary.by_verdict.FAIL > 0) return 1;
+  return report.summary.verified === report.summary.planned ? 0 : 2;
+}
+
+function emit(report: Report, runsDir: string): void {
+  const written = writeReport(report, runsDir);
+  console.log(formatReport(report));
+  console.log(`Report:  ${written.json}`);
+}
+
+/** Runs one or more cases, one after another, each behind its own pre-flight check, and ends with one report. */
+async function runCommand(casePaths: string[], values: { script?: string; "judge-script"?: string; defects?: string; "negative-control"?: boolean; mutate?: string; target?: string }): Promise<number> {
+  if (new Set(casePaths).size !== casePaths.length) usage("The same case file was given twice.");
+  const loaded: Array<{ path: string; testCase: TestCase }> = [];
+  const invalid: string[] = [];
+  for (const path of casePaths) {
+    try {
+      loaded.push({ path, testCase: loadCase(path) });
+    } catch (error) {
+      if (!(error instanceof CaseValidationError)) throw error;
+      invalid.push(error.message);
+    }
   }
-  if (record.outcomes.length === 0) line("  (no expected result was evaluated)");
-  if (record.blocked) {
-    const shot = record.evidence.find((e) => e.id === record.blocked?.evidence.find((id) => id.endsWith("-screenshot")));
-    line(`  Blocked at step ${record.blocked.step} (${record.blocked.reason}): ${record.blocked.step_text}`);
-    if (record.blocked.tool_error) line(`    last tool error: ${record.blocked.tool_error}`);
-    if (shot) line(`    screenshot: ${join(runDir, shot.path)}`);
+  if (invalid.length > 0) {
+    // A case that does not validate is rejected before anything runs (manual: Definitions), and nothing in the batch starts.
+    for (const message of invalid) console.error(message);
+    return 64;
   }
-  if (record.run_state.actor_stop_reason) line(`  Stopped: ${record.run_state.stop_source === "runner" ? "the runner's loop detection" : "the actor"} reported ${record.run_state.actor_stop_reason}`);
-  if (record.run_state.runner_stop_reason) line(`  Stopped: the runner reported ${record.run_state.runner_stop_reason}${record.budget.stop ? ` (${record.budget.stop.detail})` : ""}`);
-  if (record.run_state.infrastructure_failure) line(`  Infrastructure: ${record.run_state.infrastructure_failure}`);
-  for (const e of record.guardrail_events.filter((g) => g.decision === "blocked")) line(`  Guardrail blocked ${e.type}: ${e.url} (${e.detail})`);
-  for (const c of record.cleanup_errors) line(`  Cleanup: ${c}`);
-  if (record.model_output.attempts > 1 || !record.model_output.valid) {
-    line(`  Model report: ${record.model_output.valid ? "accepted" : "rejected"} after ${record.model_output.attempts} attempt(s)${record.model_output.errors.length ? ` (${record.model_output.errors[record.model_output.errors.length - 1]})` : ""}`);
+  const idList = loaded.map((l) => l.testCase.id);
+  if (new Set(idList).size !== idList.length) usage("Two of the case files have the same case id.");
+  if (loaded.length > 1 && (values.script !== undefined || values["judge-script"] !== undefined || values.mutate !== undefined)) {
+    usage("--script, --judge-script and --mutate belong to one case, so they need exactly one case file.");
   }
-  if (record.judge.configured) {
-    line(`  Judge: ${record.judge.name}, ${record.judge.calls} call(s), ${record.judge.attempts} attempt(s)${record.judge.injection_reports ? `, ${record.judge.injection_reports} injection report(s)` : ""}`);
+
+  const scriptFor = (c: TestCase) => values.script ?? `tests/ci/scripts/${c.id}.json`;
+  for (const { testCase } of loaded) {
+    if (!existsSync(scriptFor(testCase))) usage(`No script found at ${scriptFor(testCase)}. Pass --script <file>.`);
   }
-  if (record.run_state.injection_suspected) line("  ALERT: an attempt to influence the bot was reported. The security reviewer should look at this run.");
-  const imp = record.implicit;
-  if (imp.enabled) {
-    const total = imp.findings.length;
-    line(`  Implicit checks: ${total} finding(s)${total ? ` (console ${imp.counts.console_error}, HTTP ${imp.counts.http_error}, failed requests ${imp.counts.failed_request}, images ${imp.counts.broken_image}, accessibility ${imp.counts.accessibility})` : ""}. Reported only: they do not change the verdict.`);
-    for (const f of imp.findings.slice(0, 8)) line(`    - [${f.kind}${f.rule ? ` ${f.rule}` : ""}${f.impact ? `, ${f.impact}` : ""}] ${f.detail}${f.count > 1 ? ` (x${f.count})` : ""}`);
-    if (total > 8) line(`    ... and ${total - 8} more in run.json${imp.truncated ? " (the list was capped)" : ""}`);
+  const judgePath = values["judge-script"];
+  if (judgePath !== undefined && !existsSync(judgePath)) usage(`No judge script found at ${judgePath}.`);
+  if (judgePath === undefined && loaded.some((l) => l.testCase.expected.some((e) => e.kind === "judged"))) {
+    console.error("Note: a case has judged expected results and no --judge-script was given, so they will get NO_EVIDENCE and that run will be INCONCLUSIVE.\n");
   }
-  line();
-  const notVerified = record.verdict === "PASS" ? 0 : 1;
-  line(`Summary: bot executed 1 of 1 planned cases, ${notVerified} not verified.`);
-  line(`Record:  ${join(runDir, "run.json")}`);
+
+  const entries = loaded.map(({ path, testCase }) => {
+    if (!values["negative-control"]) return { path, testCase, control: null as string | null };
+    const control = negativeControl(testCase, values.mutate);
+    return { path, testCase: control.testCase, control: `negative control: ${control.mutatedId} made wrong, expect FAIL` };
+  });
+
+  const defects = (values.defects ?? "").split(",").map((d) => d.trim()).filter(Boolean);
+  try {
+    assertKnownDefects(defects);
+  } catch (error) {
+    usage((error as Error).message);
+  }
+  const { targetOrigin, site } = await resolveTarget(values.target, defects);
+
+  try {
+    const config = loadConfig();
+    const runDirs = new Map<string, string>();
+    const notRun = new Map<string, string>();
+    let stopped: string | null = null;
+    let printedPreflight = false;
+    for (const entry of entries) {
+      const id = entry.testCase.id;
+      // After a refusal the rest of the batch does not start. They are reported as planned and not executed.
+      if (stopped !== null) {
+        notRun.set(id, `not started, because ${stopped}`);
+        continue;
+      }
+      try {
+        const { runDir, preflight } = await orchestrateRun({
+          testCase: entry.testCase,
+          caseSource: entry.path,
+          targetOrigin,
+          config,
+          // The only valid target is the fixture site, whose credentials are fake.
+          secrets: new StaticSecretStore(FIXTURE_SECRETS),
+          // The canary cases use the same kind of model as the real run.
+          modelFor: (c) => ScriptedModelClient.fromFile(c.id === id ? scriptFor(entry.testCase) : `tests/ci/scripts/${c.id}.json`),
+          ...(judgePath !== undefined ? { judge: ScriptedJudge.fromFile(judgePath) } : {}),
+          provider: new ScriptedProviderStatus(),
+          killSwitch: new KillSwitch({ config, targetOrigin }),
+        });
+        runDirs.set(id, runDir);
+        if (!printedPreflight) printPreflight(preflight);
+        printedPreflight = true;
+      } catch (error) {
+        if (error instanceof PreflightFailedError) {
+          printPreflight(error.report);
+          console.error(error.message);
+          stopped = `the pre-flight check failed (${failedChecks(error.report).map((c) => c.name).join(", ")})`;
+          notRun.set(id, error.message);
+        } else if (error instanceof RunnerPausedError) {
+          console.error(error.message);
+          stopped = "the runner is paused by the kill switch";
+          notRun.set(id, error.message);
+        } else {
+          throw error;
+        }
+      }
+    }
+
+    // The report reads the stored run records, so what it shows is what was written to disk.
+    const plan: PlanEntry[] = entries.map((e) => ({
+      id: e.testCase.id,
+      source: e.path,
+      title: e.testCase.title,
+      priority: e.testCase.priority,
+      ...(notRun.has(e.testCase.id) ? { notRunReason: notRun.get(e.testCase.id)! } : {}),
+      ...(e.control ? { control: e.control } : {}),
+    }));
+    const report = buildReport({
+      reportId: newReportId(),
+      generatedAt: new Date().toISOString(),
+      plan,
+      runs: [...runDirs.values()].map((dir) => loadRun(dir)),
+    });
+    emit(report, config.runs.directory);
+    return exitCodeFor(report);
+  } finally {
+    await site?.close();
+  }
+}
+
+/** Builds a report from run records already on disk, optionally against the plan that was meant to run. */
+function reportCommand(runPaths: string[], values: { plan?: string }): number {
+  if (runPaths.length === 0) usage("Expected: report <run directory or run.json>... [--plan a.yaml,b.yaml]");
+  let plan: PlanEntry[] | null = null;
+  if (values.plan !== undefined) {
+    plan = [];
+    for (const path of values.plan.split(",").map((p) => p.trim()).filter(Boolean)) {
+      try {
+        const c = loadCase(path);
+        plan.push({ id: c.id, source: path, title: c.title, priority: c.priority });
+      } catch (error) {
+        if (!(error instanceof CaseValidationError)) throw error;
+        console.error(error.message);
+        return 64;
+      }
+    }
+  }
+  try {
+    const report = buildReport({ reportId: newReportId(), generatedAt: new Date().toISOString(), plan, runs: runPaths.map((p) => loadRun(p)) });
+    emit(report, loadConfig().runs.directory);
+    return exitCodeFor(report);
+  } catch (error) {
+    if (error instanceof ReportError) {
+      console.error(error.message);
+      return 64;
+    }
+    throw error;
+  }
 }
 
 async function main(): Promise<number> {
@@ -194,6 +317,7 @@ async function main(): Promise<number> {
       "preflight-report": { type: "string" },
       "golden-report": { type: "string" },
       cases: { type: "string" },
+      plan: { type: "string" },
       out: { type: "string" },
       "for-resume": { type: "boolean", default: false },
       sample: { type: "string" },
@@ -210,76 +334,9 @@ async function main(): Promise<number> {
   if (command === "preflight") return preflightCommand(values);
   if (command === "eval") return evalCommand(casePath, values);
   if (command === "golden") return goldenCommand(casePath, values);
-  if (command !== "run" || !casePath) usage("Expected: run <case.yaml>, preflight, or kill-switch status|engage|resume");
-
-  let testCase;
-  try {
-    testCase = loadCase(casePath);
-  } catch (error) {
-    if (error instanceof CaseValidationError) {
-      console.error(error.message);
-      return 64;
-    }
-    throw error;
-  }
-
-  const scriptPath = values.script ?? `tests/ci/scripts/${testCase.id}.json`;
-  if (!existsSync(scriptPath)) usage(`No script found at ${scriptPath}. Pass --script <file>.`);
-  const judgePath = values["judge-script"];
-  if (judgePath !== undefined && !existsSync(judgePath)) usage(`No judge script found at ${judgePath}.`);
-  const hasJudged = testCase.expected.some((e) => e.kind === "judged");
-  if (hasJudged && judgePath === undefined) {
-    console.error("Note: this case has judged expected results and no --judge-script was given, so they will get NO_EVIDENCE and the run will be INCONCLUSIVE.\n");
-  }
-
-  let note: string | null = null;
-  if (values["negative-control"]) {
-    const control = negativeControl(testCase, values.mutate);
-    testCase = control.testCase;
-    note = `negative control: ${control.mutatedId} made wrong, expect FAIL`;
-  }
-
-  const defects = (values.defects ?? "").split(",").map((d) => d.trim()).filter(Boolean);
-  try {
-    assertKnownDefects(defects);
-  } catch (error) {
-    usage((error as Error).message);
-  }
-  const { targetOrigin, site } = await resolveTarget(values.target, defects);
-
-  try {
-    const config = loadConfig();
-    const planned = testCase;
-    const { record, runDir, preflight } = await orchestrateRun({
-      testCase: planned,
-      caseSource: casePath,
-      targetOrigin,
-      config,
-      // The only valid target is the fixture site, whose credentials are fake.
-      secrets: new StaticSecretStore(FIXTURE_SECRETS),
-      // The canary cases use the same kind of model as the real run.
-      modelFor: (c) => ScriptedModelClient.fromFile(c.id === planned.id ? scriptPath : `tests/ci/scripts/${c.id}.json`),
-      ...(judgePath !== undefined ? { judge: ScriptedJudge.fromFile(judgePath) } : {}),
-      provider: new ScriptedProviderStatus(),
-      killSwitch: new KillSwitch({ config, targetOrigin }),
-    });
-    printPreflight(preflight);
-    printSummary(record, runDir, note);
-    return record.verdict === "PASS" ? 0 : record.verdict === "FAIL" ? 1 : 2;
-  } catch (error) {
-    if (error instanceof PreflightFailedError) {
-      printPreflight(error.report);
-      console.error(error.message);
-      return 3;
-    }
-    if (error instanceof RunnerPausedError) {
-      console.error(error.message);
-      return 3;
-    }
-    throw error;
-  } finally {
-    await site?.close();
-  }
+  if (command === "report") return reportCommand(positionals.slice(1), values);
+  if (command !== "run" || !casePath) usage("Expected: run <case.yaml>..., report, preflight, or kill-switch status|engage|resume");
+  return runCommand(positionals.slice(1), values);
 }
 
 async function preflightCommand(values: { cases?: string; out?: string; target?: string; "for-resume"?: boolean }): Promise<number> {

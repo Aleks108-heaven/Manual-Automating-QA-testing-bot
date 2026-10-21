@@ -37,6 +37,8 @@ export type Script = z.infer<typeof ScriptSchema>;
 
 export class ScriptedModelClient implements ModelClient {
   readonly name = "scripted";
+  readonly modelId = "scripted";
+  readonly live = false;
   private readonly script: Script;
   private pendingUsage: ModelUsage | undefined;
 

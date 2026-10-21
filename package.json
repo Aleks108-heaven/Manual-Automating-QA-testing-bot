@@ -18,6 +18,7 @@
     "outdated": "npm outdated",
     "container:run": "powershell -NoProfile -File scripts/container-run.ps1",
     "run-case": "node src/cli.ts run",
+    "schemas": "node scripts/emit-schemas.ts",
     "fixture": "node fixtures/site/server.ts"
   },
   "dependencies": {

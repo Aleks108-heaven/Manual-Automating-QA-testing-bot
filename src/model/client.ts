@@ -41,6 +41,10 @@ export interface FinalContext {
 
 export interface ModelClient {
   readonly name: string;
+  /** The pinned model ID the provider was asked for. Every report carries it (manual: Reading results). */
+  readonly modelId: string;
+  /** False for a scripted fake. A report says so, so a scripted run is never read as a language model's judgment. */
+  readonly live: boolean;
   nextAction(context: ModelContext): Promise<ModelAction>;
   /** Raw actor output JSON. The runner validates it against ActorOutputSchema and never repairs it. */
   finalOutput(context: FinalContext): Promise<unknown>;

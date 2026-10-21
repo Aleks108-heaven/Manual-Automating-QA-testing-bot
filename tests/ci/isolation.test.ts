@@ -44,6 +44,6 @@ describe("product code isolation", () => {
 
   it("does not write files outside the run directory helpers", () => {
     const writers = files.filter((f) => /writeFileSync|mkdirSync|appendFileSync|createWriteStream/.test(f.text)).map((f) => f.path).sort();
-    expect(writers).toEqual(["src/ops/kill-switch.ts", "src/oracle/evidence.ts", "src/preflight/preflight.ts", "src/runner/run-case.ts", "src/sessions/session-setup.ts", "src/tools/tool-layer.ts"]);
+    expect(writers).toEqual(["src/ops/kill-switch.ts", "src/oracle/evidence.ts", "src/preflight/preflight.ts", "src/report/write.ts", "src/runner/run-case.ts", "src/sessions/session-setup.ts", "src/tools/tool-layer.ts"]);
   });
 });

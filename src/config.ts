@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { z } from "zod";
@@ -146,6 +147,30 @@ const ConfigSchema = z.strictObject({
   }),
 });
 export type Config = z.infer<typeof ConfigSchema>;
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonicalJson(v)}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+/**
+ * A fingerprint of the configuration a run used (manual: Reading results, report header). It leaves out the places
+ * that differ from one machine to the next (the runs, sessions and kill-switch paths), so the same settings give the
+ * same hash anywhere. Every other value counts, including the environment overrides that were applied.
+ */
+export function configHash(config: Config): string {
+  const copy = structuredClone(config) as Record<string, any>;
+  delete copy["_comment"];
+  delete copy["runs"];
+  delete copy["sessions"].directory;
+  delete copy["killSwitch"].stateFile;
+  delete copy["killSwitch"].auditLog;
+  return createHash("sha256").update(canonicalJson(copy)).digest("hex");
+}
 
 /**
  * Loads config/default.json. Environment overrides:

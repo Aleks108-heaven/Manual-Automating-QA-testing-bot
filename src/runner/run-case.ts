@@ -9,7 +9,7 @@ import { ImplicitCollector } from "../implicit/collect.ts";
 import type { JudgeClient } from "../judge/client.ts";
 import type { PreflightReport } from "../preflight/report.ts";
 import { RunnerPausedError, type KillSwitch, type PauseSource } from "../ops/kill-switch.ts";
-import type { Config } from "../config.ts";
+import { configHash, type Config } from "../config.ts";
 import type { ModelClient } from "../model/client.ts";
 import { FileEvidenceSink } from "../oracle/evidence.ts";
 import { Redactor } from "../redact/redactor.ts";
@@ -274,9 +274,17 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
   });
 
   const record: RunRecord = RunRecordSchema.parse({
-    schema_version: 3,
+    schema_version: 4,
     run_id: runId,
-    case: { id: testCase.id, title: testCase.title, priority: testCase.priority, source: options.caseSource },
+    case: {
+      id: testCase.id,
+      title: testCase.title,
+      priority: testCase.priority,
+      source: options.caseSource,
+      steps_total: testCase.steps.length,
+      preconditions: testCase.preconditions,
+      expected: testCase.expected.map((e) => ({ id: e.id, kind: e.kind, after_step: e.after_step, description: e.description })),
+    },
     started_at: startedAt,
     finished_at: new Date().toISOString(),
     target: targetOrigin,
@@ -284,15 +292,19 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
       bot: readVersion("package.json"),
       node: process.version,
       playwright: readVersion("node_modules/playwright/package.json"),
+      axe_core: readVersion("node_modules/axe-core/package.json"),
       browser: access?.browserVersion ?? "not started",
       browser_sandbox: access?.browserSandbox ?? config.browser.sandbox,
       model_client: model.name,
+      model_id: model.modelId,
+      model_live: model.live,
       prompt_hashes: Object.fromEntries(
         ["actor.v1.md", "judge.v1.md"].flatMap((f) => {
           const h = sha256(join("prompts", f));
           return h ? [[f, h]] : [];
         }),
       ),
+      config_hash: configHash(config),
       build: before.build,
     },
     steps: loop?.steps ?? [],
@@ -318,6 +330,8 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
     judge: {
       configured: options.judge !== undefined,
       name: options.judge?.name ?? null,
+      model_id: options.judge?.modelId ?? null,
+      live: options.judge?.live ?? null,
       calls: loop?.judge.calls ?? 0,
       attempts: loop?.judge.attempts ?? 0,
       errors: loop?.judge.errors ?? [],

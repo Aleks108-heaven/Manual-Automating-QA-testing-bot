@@ -30,11 +30,15 @@ export function testConfig(change: (c: Config) => void = () => undefined): Confi
 /** Wraps a model and keeps a copy of everything the loop hands to it, which is everything the model is shown. */
 export class RecordingModel implements ModelClient {
   readonly name: string;
+  readonly modelId: string;
+  readonly live: boolean;
   readonly seen: string[] = [];
   private readonly inner: ModelClient;
   constructor(inner: ModelClient) {
     this.inner = inner;
     this.name = inner.name;
+    this.modelId = inner.modelId;
+    this.live = inner.live;
   }
   async nextAction(context: ModelContext): Promise<ModelAction> {
     this.seen.push(JSON.stringify(context));

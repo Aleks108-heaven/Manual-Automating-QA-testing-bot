@@ -23,6 +23,8 @@ export type JudgeScript = z.infer<typeof JudgeScriptSchema>;
 
 export class ScriptedJudge implements JudgeClient {
   readonly name = "scripted-judge";
+  readonly modelId = "scripted-judge";
+  readonly live = false;
   readonly inputs: JudgeInput[] = [];
   private readonly script: JudgeScript;
   private pendingUsage: ModelUsage | undefined;

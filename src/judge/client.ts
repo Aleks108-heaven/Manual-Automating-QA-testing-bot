@@ -38,6 +38,10 @@ export interface JudgeInput {
 
 export interface JudgeClient {
   readonly name: string;
+  /** The pinned model ID of the judge. Every report carries it. */
+  readonly modelId: string;
+  /** False for a scripted fake. */
+  readonly live: boolean;
   /** Raw judge output JSON. The runner validates it and never repairs it. */
   judge(input: JudgeInput): Promise<unknown>;
   /** Tokens used since the last call, for the cost budget. Optional. */
