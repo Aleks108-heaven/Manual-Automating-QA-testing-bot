@@ -24,6 +24,7 @@ export const STAMP_NAMES = [
   "actor_prompt_hash",
   "judge_prompt_hash",
   "bot",
+  "bot_source_hash",
   "node",
   "playwright",
   "axe_core",
@@ -62,6 +63,8 @@ export type Attention = z.infer<typeof AttentionSchema>;
 
 const BugDraftSchema = z.strictObject({
   draft: z.literal(true),
+  /** Set when the case was changed on purpose. The FAIL is then expected, and the draft is probably not a defect. */
+  control: z.string().nullable(),
   title: z.string(),
   build: z.string().nullable(),
   configuration: z.string(),
@@ -118,7 +121,7 @@ const CaseEntrySchema = z.strictObject({
   title: z.string().nullable(),
   priority: z.string().nullable(),
   source: z.string(),
-  /** Set when the case was changed on purpose (a negative control). Its FAIL is expected, and no bug report is drafted for it. */
+  /** Set when the case was changed on purpose (a negative control). Its FAIL is expected. */
   control: z.string().nullable(),
   /** executed: the run produced a run record that passed the reporter's checks. */
   status: z.enum(["executed", "not_executed"]),

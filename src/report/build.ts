@@ -29,7 +29,7 @@ export interface PlanEntry {
 
 export type LoadedRun = { path: string; runDir: string } & ({ record: RunRecord } | { error: string });
 
-const SUPPORTED_VERSION = 4;
+const SUPPORTED_VERSION = 5;
 
 /** Reads one run record from a run directory or a run.json path. A record it cannot read becomes an error, never a guess. */
 export function loadRun(path: string): LoadedRun {
@@ -110,6 +110,7 @@ function stampValue(record: RunRecord, name: StampName): string | null {
     case "actor_prompt_hash": return v.prompt_hashes["actor.v1.md"] ?? null;
     case "judge_prompt_hash": return v.prompt_hashes["judge.v1.md"] ?? null;
     case "bot": return v.bot;
+    case "bot_source_hash": return v.bot_source_hash;
     case "node": return v.node;
     case "playwright": return v.playwright;
     case "axe_core": return v.axe_core;
@@ -176,7 +177,7 @@ function attentionFor(priority: string | null, verdict: Verdict | null, record: 
   return list;
 }
 
-function bugDraft(record: RunRecord, runDir: string): BugDraft {
+function bugDraft(record: RunRecord, runDir: string, control: string | null): BugDraft {
   const mismatched = record.outcomes.filter((o) => o.outcome === "MISMATCH");
   const pathOf = (id: string): string | null => {
     const e = record.evidence.find((x) => x.id === id);
@@ -184,6 +185,7 @@ function bugDraft(record: RunRecord, runDir: string): BugDraft {
   };
   return {
     draft: true,
+    control,
     title: `${record.case.id}: ${record.case.title} (${mismatched.length} expected result${mismatched.length > 1 ? "s" : ""} did not match: ${ids(mismatched.map((o) => o.expected_ref))})`,
     build: record.versions.build,
     configuration: record.versions.config_hash,
@@ -310,8 +312,8 @@ export function buildReport(input: ReportInput): Report {
           rationale: rationale(r),
           attention: attentionFor(r.case.priority, r.verdict, r),
           run: runView(r, run.runDir),
-          // A negative control fails on purpose. A bug draft for it would send a person after a defect that is not there.
-          bug_draft: r.verdict === "FAIL" && p.control === undefined ? bugDraft(r, run.runDir) : null,
+          // A negative control fails on purpose. Its draft is marked as a control, and a person decides what to do with it.
+          bug_draft: r.verdict === "FAIL" ? bugDraft(r, run.runDir, p.control ?? null) : null,
         };
       }
       return notExecuted(p, `the run record at ${run.path} was rejected: ${problems.join("; ")}`, true);

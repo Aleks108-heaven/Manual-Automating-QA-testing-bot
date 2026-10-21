@@ -9,7 +9,7 @@ function stamp(report: Report, name: StampName): Stamp {
   return s;
 }
 
-const HASHES: ReadonlySet<StampName> = new Set(["config_hash", "actor_prompt_hash", "judge_prompt_hash"]);
+const HASHES: ReadonlySet<StampName> = new Set(["config_hash", "actor_prompt_hash", "judge_prompt_hash", "bot_source_hash"]);
 
 /** A stamp as text: the value, or every value when the runs disagree, or UNKNOWN when a run could not record it. */
 function stampText(report: Report, name: StampName): string {
@@ -43,7 +43,7 @@ export function formatHeader(report: Report): string[] {
   out.push(`Model    ${stampText(report, "model_id")}${live(report, "model_live")}`);
   out.push(`Judge    ${stampText(report, "judge_model_id")}${live(report, "judge_live")}`);
   out.push(`Prompts  actor.v1.md ${stampText(report, "actor_prompt_hash")}, judge.v1.md ${stampText(report, "judge_prompt_hash")}`);
-  out.push(`Tools    bot ${stampText(report, "bot")}, Node ${stampText(report, "node")}, Playwright ${stampText(report, "playwright")}, axe-core ${stampText(report, "axe_core")}`);
+  out.push(`Tools    bot ${stampText(report, "bot")} (source sha256 ${stampText(report, "bot_source_hash")}), Node ${stampText(report, "node")}, Playwright ${stampText(report, "playwright")}, axe-core ${stampText(report, "axe_core")}`);
   out.push(`Browser  ${stampText(report, "browser")}, sandbox ${stampText(report, "browser_sandbox") === "true" ? "on" : stampText(report, "browser_sandbox") === "false" ? "OFF" : stampText(report, "browser_sandbox")}`);
   out.push(`Pre-flight  a passed check came before ${h.preflight.runs_after_passed_preflight} of ${h.preflight.executed} executed run(s)`);
   const missing = h.stamps.filter((s) => s.status === "missing").map((s) => s.name);
@@ -115,6 +115,7 @@ export function formatCase(c: CaseEntry): string[] {
     const d = c.bug_draft;
     line();
     line("  Draft bug report (a draft: a person sets the cause category, severity and priority)");
+    if (d.control) line(`    NOTE: this case was changed on purpose (${d.control}). The FAIL is expected, so this is probably not a defect. A person decides.`);
     line(`    Title:          ${d.title}`);
     line(`    Build:          ${d.build ?? "unknown"}   Configuration: sha256 ${d.configuration.slice(0, 12)}   Target: ${d.target}   Role: ${d.role}`);
     line(`    Preconditions:  ${d.preconditions.length ? d.preconditions.join("; ") : "none listed"}`);
@@ -138,7 +139,11 @@ export function formatSummary(report: Report): string[] {
   const v = s.by_verdict;
   const out: string[] = [];
   out.push(`Summary: ${s.line}.`);
-  out.push(`  PASS ${v.PASS}, FAIL ${v.FAIL}, BLOCKED ${v.BLOCKED}, INCONCLUSIVE ${v.INCONCLUSIVE}, INCOMPLETE ${v.INCOMPLETE}, not executed ${v.NOT_EXECUTED}. Only PASS is verified.`);
+  // Executed cases that are not PASS are not verified either, so they are named here next to the ones that never ran.
+  const notVerified = ([["FAIL", v.FAIL], ["BLOCKED", v.BLOCKED], ["INCONCLUSIVE", v.INCONCLUSIVE], ["INCOMPLETE", v.INCOMPLETE], ["not executed", v.NOT_EXECUTED]] as const)
+    .filter(([, n]) => n > 0)
+    .map(([name, n]) => `${name} ${n}`);
+  out.push(`  Verified (PASS): ${v.PASS}. Not verified: ${notVerified.length > 0 ? notVerified.join(", ") : "none"}. Only PASS is verified.`);
   const flagged = report.cases.filter((c) => c.attention.length > 0);
   if (flagged.length > 0) {
     out.push("Needs a person:");

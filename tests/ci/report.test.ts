@@ -3,11 +3,11 @@
 // reach states a real run does not easily produce (every precedence row, a record that disagrees with itself).
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { reportJsonSchema, REPORT_SCHEMA_PATH } from "../../scripts/emit-schemas.ts";
+import { reportJsonSchema, REPORT_SCHEMA_PATH, SCHEMA_FILES } from "../../scripts/emit-schemas.ts";
 import { loadCase } from "../../src/cases/load.ts";
 import { negativeControl } from "../../src/cases/mutate.ts";
 import { configHash, loadConfig } from "../../src/config.ts";
@@ -17,6 +17,7 @@ import { formatReport } from "../../src/report/format.ts";
 import { ReportSchema, summaryLine, type Report } from "../../src/report/schema.ts";
 import { newReportId, writeReport } from "../../src/report/write.ts";
 import type { RunRecord } from "../../src/schemas/run-record.ts";
+import { botSourceHash } from "../../src/version-stamp.ts";
 import { StaticSecretStore } from "../../src/secrets/store.ts";
 import { PRECEDENCE_ROWS } from "../../src/verdict/calculate.ts";
 import { FIXTURE_SECRETS } from "../../fixtures/secrets.ts";
@@ -241,13 +242,27 @@ describe("the per-case detail", () => {
     expect(text).toContain("Scrub evidence before attaching it to a ticket");
   });
 
-  it("a PASS has no bug draft, and a negative control gets none either", () => {
+  it("a PASS has no bug draft, and a negative control gets one that is marked as a control", () => {
     const r = report([plan("TC-FORM-001")], [loadRun(made["pass"]!.runDir)]);
     expect(r.cases[0]!.bug_draft).toBeNull();
     const control = report([plan("TC-FORM-001", { control: "negative control: e1 made wrong, expect FAIL" })], [loadRun(made["control"]!.runDir)]);
-    expect(control.cases[0]).toMatchObject({ verdict: "FAIL", bug_draft: null, control: "negative control: e1 made wrong, expect FAIL" });
+    expect(control.cases[0]).toMatchObject({ verdict: "FAIL", control: "negative control: e1 made wrong, expect FAIL" });
+    // The draft is there for a person to use or discard. It says the FAIL was expected, and it does not decide anything.
+    expect(control.cases[0]!.bug_draft).toMatchObject({ draft: true, control: "negative control: e1 made wrong, expect FAIL", cause_category: "untriaged", suggested_severity: null });
     expect(formatReport(control)).toContain("[negative control: e1 made wrong, expect FAIL]");
-    expect(formatReport(control)).not.toContain("Draft bug report");
+    expect(formatReport(control)).toContain("this case was changed on purpose");
+    // A real FAIL carries no such note.
+    expect(report([plan("TC-AUTH-003")], [loadRun(made["fail"]!.runDir)]).cases[0]!.bug_draft!.control).toBeNull();
+  });
+
+  it("the summary names what is not verified, so a FAIL is not lost behind the count of cases that ran", () => {
+    const r = report([plan("TC-FORM-001"), plan("TC-AUTH-003"), plan("TC-JUDGE-001"), plan("TC-ACCT-001", { notRunReason: "skipped" })], [
+      loadRun(made["pass"]!.runDir),
+      loadRun(made["fail"]!.runDir),
+      loadRun(made["judge-none"]!.runDir),
+    ]);
+    expect(formatReport(r)).toContain("Verified (PASS): 1. Not verified: FAIL 1, INCONCLUSIVE 1, not executed 1.");
+    expect(formatReport(report([plan("TC-FORM-001")], [loadRun(made["pass"]!.runDir)]))).toContain("Not verified: none.");
   });
 
   it("lists steps with their screenshots, and says no trace is kept", () => {
@@ -313,6 +328,7 @@ describe("T15 every report is reproducible", () => {
     expect(stamp(r, "judge_prompt_hash").values).toEqual([sha("judge.v1.md")]);
     const version = (p: string) => (JSON.parse(readFileSync(p, "utf8")) as { version: string }).version;
     expect(stamp(r, "bot").values).toEqual([version("package.json")]);
+    expect(stamp(r, "bot_source_hash").values).toEqual([botSourceHash()]);
     expect(stamp(r, "playwright").values).toEqual([version("node_modules/playwright/package.json")]);
     expect(stamp(r, "axe_core").values).toEqual([version("node_modules/axe-core/package.json")]);
     expect(stamp(r, "node").values).toEqual([process.version]);
@@ -399,6 +415,36 @@ describe("T15 every report is reproducible", () => {
     expect(configHash(sandbox)).not.toBe(configHash(base));
   });
 
+  it("the source hash changes with any edit to the bot, ignores line endings, and needs no git", () => {
+    const root = mkdtempSync(join(tmpdir(), "qa-bot-src-"));
+    mkdirSync(join(root, "src", "sub"), { recursive: true });
+    writeFileSync(join(root, "src", "a.ts"), "export const a = 1;\nexport const b = 2;\n");
+    writeFileSync(join(root, "src", "sub", "c.ts"), "export const c = 3;\n");
+    writeFileSync(join(root, "package-lock.json"), "{}\n");
+    const first = botSourceHash(root);
+    expect(first).toMatch(/^[0-9a-f]{64}$/);
+
+    const crlf = mkdtempSync(join(tmpdir(), "qa-bot-src-"));
+    cpSync(root, crlf, { recursive: true });
+    writeFileSync(join(crlf, "src", "a.ts"), "export const a = 1;\r\nexport const b = 2;\r\n");
+    expect(botSourceHash(crlf)).toBe(first);
+
+    for (const [file, text] of [["src/a.ts", "export const a = 9;\nexport const b = 2;\n"], ["src/sub/c.ts", "export const c = 4;\n"], ["package-lock.json", '{"x":1}\n'], ["src/new.ts", "export {};\n"]] as const) {
+      const changed = mkdtempSync(join(tmpdir(), "qa-bot-src-"));
+      cpSync(root, changed, { recursive: true });
+      writeFileSync(join(changed, file), text);
+      expect(botSourceHash(changed), file).not.toBe(first);
+    }
+  });
+
+  it("a record with no source hash is not accepted", () => {
+    const dir = mkdtempSync(join(tmpdir(), "qa-bot-nohash-"));
+    const { bot_source_hash: _dropped, ...versions } = made["pass"]!.record.versions;
+    writeFileSync(join(dir, "run.json"), JSON.stringify({ ...made["pass"]!.record, versions }));
+    const loaded = loadRun(dir);
+    expect("error" in loaded && loaded.error).toContain("does not match the run record schema");
+  });
+
   it("the stored run record carries the stamps, and the hash is the one of the configuration the run used", () => {
     const v = made["pass"]!.record.versions;
     expect(v).toMatchObject({ model_id: "scripted", model_live: false });
@@ -423,9 +469,23 @@ describe("the stored report and its contract", () => {
     expect(existsSync(join(runs, "reports", r.report_id))).toBe(false);
   });
 
-  it("the committed JSON schema is the one the code produces", () => {
-    // Git may check the file out with CRLF line endings on Windows. The content is what has to match.
+  it("the committed JSON schemas (case, run record, report) are the ones the code produces", () => {
+    expect(SCHEMA_FILES.map((f) => f.path)).toEqual(["schemas/case.schema.json", "schemas/run-record.schema.json", REPORT_SCHEMA_PATH]);
+    for (const file of SCHEMA_FILES) {
+      // Git may check the file out with CRLF line endings on Windows. The content is what has to match.
+      expect(readFileSync(file.path, "utf8").replaceAll("\r\n", "\n"), file.path).toBe(file.build());
+    }
     expect(readFileSync(REPORT_SCHEMA_PATH, "utf8").replaceAll("\r\n", "\n")).toBe(reportJsonSchema());
+  });
+
+  it("the schemas describe real files: a stored run record's fields are all in the run record schema, and a case file's are in the case schema", () => {
+    const props = (path: string) => Object.keys((JSON.parse(readFileSync(path, "utf8")) as { properties: Record<string, unknown> }).properties);
+    const record = JSON.parse(readFileSync(join(made["pass"]!.runDir, "run.json"), "utf8")) as Record<string, unknown>;
+    expect(props("schemas/run-record.schema.json").sort()).toEqual(Object.keys(record).sort());
+    const caseKeys = props("schemas/case.schema.json");
+    for (const key of ["id", "title", "priority", "steps", "expected", "allowed_mutations"]) expect(caseKeys).toContain(key);
+    const required = (JSON.parse(readFileSync("schemas/case.schema.json", "utf8")) as { required: string[] }).required;
+    expect(required.sort()).toEqual(["expected", "id", "priority", "steps", "title"]);
   });
 });
 
@@ -459,7 +519,7 @@ describe("the command line ends every run with a report", () => {
     const control = await cli(["run", "cases/TC-FORM-001.yaml", "--negative-control"], runs);
     expect(control.code).toBe(1);
     expect(control.out).toContain("[negative control:");
-    expect(control.out).not.toContain("Draft bug report");
+    expect(control.out).toContain("this case was changed on purpose");
   }, 180_000);
 
   it("a refused batch reports every planned case as not executed", async () => {
@@ -479,13 +539,26 @@ describe("the command line ends every run with a report", () => {
     }
   }, 120_000);
 
-  it("rejects the whole batch before anything runs when one case file is invalid", async () => {
+  it("an invalid case file is rejected before its run and counted as not executed, and the rest of the batch still runs", async () => {
     const runs = mkdtempSync(join(tmpdir(), "qa-bot-cli-report-"));
     const bad = join(runs, "TC-BAD-001.yaml");
     writeFileSync(bad, "id: TC-BAD-001\ntitle: no expected results\npriority: P1\nsteps:\n  - Open the form\nexpected: []\n");
     const r = await cli(["run", "cases/TC-FORM-001.yaml", bad], runs);
+    expect(r.code).toBe(2);
+    expect(r.err).toContain("a case needs at least one expected result");
+    expect(r.out).toContain("Summary: bot executed 1 of 2 planned cases, 1 not verified.");
+    expect(r.out).toContain("the case file is invalid and was rejected before its run");
+    expect(r.out).toContain("Not verified: not executed 1.");
+  }, 60_000);
+
+  it("when every case file is invalid nothing starts, and it is a usage error", async () => {
+    const runs = mkdtempSync(join(tmpdir(), "qa-bot-cli-report-"));
+    const bad = join(runs, "TC-BAD-001.yaml");
+    writeFileSync(bad, "id: TC-BAD-001\ntitle: no expected results\npriority: P1\nsteps:\n  - Open the form\nexpected: []\n");
+    const r = await cli(["run", bad], runs);
     expect(r.code).toBe(64);
-    expect(r.out).not.toContain("Summary:");
+    expect(r.out).toContain("Summary: bot executed 0 of 1 planned cases, 1 not verified.");
+    expect(r.out).not.toContain("Verdict:");
   }, 60_000);
 
   it("the report command rebuilds a report from stored runs, and counts a planned case that has no run as not executed", async () => {

@@ -80,13 +80,14 @@ export const BudgetRecordSchema = z.strictObject({
 });
 export type BudgetRecord = z.infer<typeof BudgetRecordSchema>;
 
-// Run record, schema version 4 (M6). Version 0 (M1) had no session, budget, redaction or scan sections (added in
+// Run record, schema version 5. Version 5 adds a hash of the bot's own source. Version 4 (M6) added the stamps below.
+// Version 0 (M1) had no session, budget, redaction or scan sections (added in
 // version 1, M2). Version 2 (M3) added how the model's final report fared, and the judge, implicit-check and
 // blocked-step sections. Version 3 (M4) added the pre-flight summary. Version 4 (M6) adds the version stamps a report
 // needs to be reproducible (model ID, whether the model was live, axe-core, a configuration hash) and what the report
 // needs to know about the case (its expected results, step count and preconditions).
 export const RunRecordSchema = z.strictObject({
-  schema_version: z.literal(4),
+  schema_version: z.literal(5),
   run_id: z.string().min(1),
   case: z.strictObject({
     id: z.string(),
@@ -103,6 +104,8 @@ export const RunRecordSchema = z.strictObject({
   target: z.string(),
   versions: z.strictObject({
     bot: z.string(),
+    // A fingerprint of the bot's source files and lockfile (see botSourceHash). It changes with any edit, committed or not.
+    bot_source_hash: z.string().regex(/^[0-9a-f]{64}$/),
     node: z.string(),
     playwright: z.string(),
     axe_core: z.string(),

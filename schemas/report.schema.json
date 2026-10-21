@@ -71,6 +71,7 @@
                   "actor_prompt_hash",
                   "judge_prompt_hash",
                   "bot",
+                  "bot_source_hash",
                   "node",
                   "playwright",
                   "axe_core",
@@ -363,6 +364,10 @@
                       "bot": {
                         "type": "string"
                       },
+                      "bot_source_hash": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}$"
+                      },
                       "node": {
                         "type": "string"
                       },
@@ -410,6 +415,7 @@
                     },
                     "required": [
                       "bot",
+                      "bot_source_hash",
                       "node",
                       "playwright",
                       "axe_core",
@@ -1194,6 +1200,12 @@
                     "type": "boolean",
                     "const": true
                   },
+                  "control": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
                   "title": {
                     "type": "string"
                   },
@@ -1284,6 +1296,7 @@
                 },
                 "required": [
                   "draft",
+                  "control",
                   "title",
                   "build",
                   "configuration",

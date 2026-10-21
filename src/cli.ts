@@ -158,19 +158,17 @@ function emit(report: Report, runsDir: string): void {
 async function runCommand(casePaths: string[], values: { script?: string; "judge-script"?: string; defects?: string; "negative-control"?: boolean; mutate?: string; target?: string }): Promise<number> {
   if (new Set(casePaths).size !== casePaths.length) usage("The same case file was given twice.");
   const loaded: Array<{ path: string; testCase: TestCase }> = [];
-  const invalid: string[] = [];
+  const invalid = new Map<string, string>();
   for (const path of casePaths) {
     try {
       loaded.push({ path, testCase: loadCase(path) });
     } catch (error) {
       if (!(error instanceof CaseValidationError)) throw error;
-      invalid.push(error.message);
+      // A case that does not validate is rejected before its run starts and counts as not executed (manual: Definitions).
+      // The rest of the batch still runs, and the report lists the case so that a person decides what to do about it.
+      console.error(error.message);
+      invalid.set(path, error.message.replace(/\s*\n\s*/g, " "));
     }
-  }
-  if (invalid.length > 0) {
-    // A case that does not validate is rejected before anything runs (manual: Definitions), and nothing in the batch starts.
-    for (const message of invalid) console.error(message);
-    return 64;
   }
   const idList = loaded.map((l) => l.testCase.id);
   if (new Set(idList).size !== idList.length) usage("Two of the case files have the same case id.");
@@ -200,7 +198,8 @@ async function runCommand(casePaths: string[], values: { script?: string; "judge
   } catch (error) {
     usage((error as Error).message);
   }
-  const { targetOrigin, site } = await resolveTarget(values.target, defects);
+  // With nothing valid to run there is no need to start the fixture site.
+  const { targetOrigin, site } = entries.length > 0 ? await resolveTarget(values.target, defects) : { targetOrigin: "", site: null };
 
   try {
     const config = loadConfig();
@@ -249,14 +248,19 @@ async function runCommand(casePaths: string[], values: { script?: string; "judge
     }
 
     // The report reads the stored run records, so what it shows is what was written to disk.
-    const plan: PlanEntry[] = entries.map((e) => ({
-      id: e.testCase.id,
-      source: e.path,
-      title: e.testCase.title,
-      priority: e.testCase.priority,
-      ...(notRun.has(e.testCase.id) ? { notRunReason: notRun.get(e.testCase.id)! } : {}),
-      ...(e.control ? { control: e.control } : {}),
-    }));
+    const plan: PlanEntry[] = casePaths.map((path) => {
+      const reason = invalid.get(path);
+      if (reason !== undefined) return { id: `invalid case file: ${path}`, source: path, notRunReason: `the case file is invalid and was rejected before its run: ${reason}` };
+      const e = entries.find((x) => x.path === path)!;
+      return {
+        id: e.testCase.id,
+        source: e.path,
+        title: e.testCase.title,
+        priority: e.testCase.priority,
+        ...(notRun.has(e.testCase.id) ? { notRunReason: notRun.get(e.testCase.id)! } : {}),
+        ...(e.control ? { control: e.control } : {}),
+      };
+    });
     const report = buildReport({
       reportId: newReportId(),
       generatedAt: new Date().toISOString(),
@@ -264,7 +268,8 @@ async function runCommand(casePaths: string[], values: { script?: string; "judge
       runs: [...runDirs.values()].map((dir) => loadRun(dir)),
     });
     emit(report, config.runs.directory);
-    return exitCodeFor(report);
+    // Every case file invalid is a usage error, not a refused run.
+    return invalid.size === casePaths.length ? 64 : exitCodeFor(report);
   } finally {
     await site?.close();
   }

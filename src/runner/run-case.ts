@@ -10,6 +10,7 @@ import type { JudgeClient } from "../judge/client.ts";
 import type { PreflightReport } from "../preflight/report.ts";
 import { RunnerPausedError, type KillSwitch, type PauseSource } from "../ops/kill-switch.ts";
 import { configHash, type Config } from "../config.ts";
+import { botSourceHash } from "../version-stamp.ts";
 import type { ModelClient } from "../model/client.ts";
 import { FileEvidenceSink } from "../oracle/evidence.ts";
 import { Redactor } from "../redact/redactor.ts";
@@ -274,7 +275,7 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
   });
 
   const record: RunRecord = RunRecordSchema.parse({
-    schema_version: 4,
+    schema_version: 5,
     run_id: runId,
     case: {
       id: testCase.id,
@@ -290,6 +291,7 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
     target: targetOrigin,
     versions: {
       bot: readVersion("package.json"),
+      bot_source_hash: botSourceHash(),
       node: process.version,
       playwright: readVersion("node_modules/playwright/package.json"),
       axe_core: readVersion("node_modules/axe-core/package.json"),

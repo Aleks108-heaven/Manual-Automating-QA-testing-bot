@@ -33,7 +33,7 @@ Open only the page you need. Do not read the whole manual every session.
 - Run CI tests: `npm run test:ci`
 - Run one test file: `npx vitest run --config vitest.config.ts tests/ci/<file>.test.ts`
 - Run a case: `npm run run-case -- cases/TC-FORM-001.yaml` (add `--negative-control` or `--defects <name>`). Several case files make one batch and end with one report (`runs/reports/<id>/report.json` and `report.txt`)
-- Rebuild a report from stored runs: `node src/cli.ts report <run dir>... [--plan a.yaml,b.yaml]`. Regenerate the report's JSON Schema after changing `src/report/schema.ts`: `npm run schemas`
+- Rebuild a report from stored runs: `node src/cli.ts report <run dir>... [--plan a.yaml,b.yaml]`. Regenerate the JSON Schemas (case, run record, report) after changing any of those schemas: `npm run schemas`
 - Eval suites (fixture only, scripted model until a provider is chosen): `node src/cli.ts golden`, `node src/cli.ts eval mutants [--sample N]`, `node src/cli.ts eval injection [--runs N]`. Scripted results test the machinery and never fill a pilot gate. The golden set must be signed by a person; never edit an expected verdict or rehash to turn a red run green without reading what moved (docs/runbooks/golden-set.md)
 - Type check, pin check and CI tests together: `npm run check`
 - Supply chain (needs network): `npm run check:supply-chain`. Clean install plus check: `npm run ci`
