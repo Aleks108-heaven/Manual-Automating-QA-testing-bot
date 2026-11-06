@@ -32,6 +32,8 @@ export interface Proposer {
   /** The raw answer. The runner validates it against ProposalBodySchema. */
   propose(request: ProposalRequest): Promise<unknown>;
   consumeUsage?(): ModelUsage | undefined;
+  /** Called when the runner gives up waiting (the kill switch, or the time budget). A live proposer cancels its requests. Optional. */
+  abort?(): void;
 }
 
 const ScriptedProposalsSchema = z.strictObject({ case_id: z.string().min(1), answers: z.array(z.unknown()).min(1) });

@@ -106,6 +106,8 @@ export interface SharedBrowser {
 export async function launchSharedBrowser(config: Config, entries: readonly string[]): Promise<SharedBrowser> {
   const browser = await chromium.launch({
     chromiumSandbox: config.browser.sandbox,
+    headless: !config.browser.headed,
+    slowMo: config.browser.slowMoMs,
     args: [`--host-resolver-rules=${hostResolverRules(entries)}`],
   });
   return { browser, entries: [...entries], sandbox: config.browser.sandbox, close: () => browser.close().catch(() => undefined) };
@@ -165,6 +167,8 @@ export class ToolLayer {
       browser = await chromium.launch({
         // Playwright adds --no-sandbox unless chromiumSandbox is true, so say it explicitly.
         chromiumSandbox: options.config.browser.sandbox,
+        headless: !options.config.browser.headed,
+        slowMo: options.config.browser.slowMoMs,
         args: options.disableHostResolverRules ? [] : [`--host-resolver-rules=${hostResolverRules(entries)}`],
       });
     }

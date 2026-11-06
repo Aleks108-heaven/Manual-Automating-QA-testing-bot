@@ -50,4 +50,9 @@ export interface ModelClient {
   finalOutput(context: FinalContext): Promise<unknown>;
   /** Tokens used since the last call to this method, for the cost budget. Optional. */
   consumeUsage?(): ModelUsage | undefined;
+  /**
+   * Called when the runner gives up waiting for a call (the kill switch, or the time budget). A client that talks to a server
+   * cancels its requests, so a call nobody waits for any longer does not go on sending prompts. Optional.
+   */
+  abort?(): void;
 }

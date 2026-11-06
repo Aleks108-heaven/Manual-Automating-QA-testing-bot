@@ -22,6 +22,8 @@ Only synthetic or masked data reaches the LLM provider, and nothing is stored lo
 
 A standby provider for failover needs its own review before it is ever used.
 
+**Local model servers.** A model server on this machine (LM Studio, Ollama and similar, at a loopback address) keeps every prompt on the machine. The configuration still records the model, and the configuration refuses a provider whose address is not a loopback address, or whose model runs on the vendor's servers (an Ollama `:cloud` model), unless it names a provider register entry (`provider.registerEntry`), and then only over https. This stops a prompt leaving the machine by accident. It checks names, not facts: the code cannot tell whether the entry exists, and a `:cloud` model renamed locally is not recognised. It does not replace the register: the entry itself, and the review behind it, are the compliance owner's. See [the live model runbook](../runbooks/live-provider.md).
+
 **Evidence tiers**
 
 | Tier | Contents | Retention |

@@ -4,6 +4,8 @@
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { BudgetGuard, DeadlineExceeded, withDeadline, type BudgetStop } from "../agent/budget.ts";
+import { KILLED, raceKill } from "../agent/race.ts";
+import type { PauseSource } from "../ops/kill-switch.ts";
 import type { Config } from "../config.ts";
 import type { Redactor } from "../redact/redactor.ts";
 import { JudgeOutputSchema } from "../schemas/actor.ts";
@@ -64,6 +66,8 @@ export async function judgeItems(args: {
   guard: BudgetGuard;
   config: Config;
   redactor: Redactor;
+  /** The kill switch. When it is engaged the wait for the judge ends at once and the results are NO_EVIDENCE (the loop then stops the run). */
+  pause?: PauseSource;
 }): Promise<JudgeBatchResult> {
   const { judge, items, guard, config, redactor } = args;
   const errors: string[] = [];
@@ -81,14 +85,20 @@ export async function judgeItems(args: {
       attempt,
       previous_error: previousError,
     };
-    let raw: unknown;
+    let waited;
     try {
-      raw = await withDeadline(judge.judge(input), guard.remainingMs);
+      waited = await raceKill(withDeadline(judge.judge(input), guard.remainingMs), args.pause);
     } catch (error) {
       if (!(error instanceof DeadlineExceeded)) throw error;
+      judge.abort?.();
       const timeout: BudgetStop = { reason: "timeout", detail: `time limit of ${config.budgets.maxWallMs} ms reached while waiting for the judge` };
       return { results: none(items, timeout.detail), attempts: attempt, errors, budgetStop: timeout };
     }
+    if (waited === KILLED) {
+      judge.abort?.();
+      return { results: none(items, "the runner was paused by the kill switch while the judge was answering"), attempts: attempt, errors, budgetStop: null };
+    }
+    const raw: unknown = waited;
     guard.chargeUsage(judge.consumeUsage?.());
 
     const parsed = JudgeOutputSchema.safeParse(raw);

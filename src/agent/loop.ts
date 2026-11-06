@@ -16,6 +16,7 @@ import type { OutcomeRecord, StepRecord } from "../schemas/run-record.ts";
 import type { RunnerAccess, ToolLayer } from "../tools/tool-layer.ts";
 import type { PauseSource } from "../ops/kill-switch.ts";
 import { BudgetGuard, DeadlineExceeded, withDeadline, type BudgetSnapshot, type BudgetStop } from "./budget.ts";
+import { KILLED, raceKill } from "./race.ts";
 
 export interface LoopOptions {
   testCase: TestCase;
@@ -56,33 +57,7 @@ export interface LoopResult {
   judge: { calls: number; attempts: number; errors: string[]; injection: number };
 }
 
-export const KILLED = Symbol("killed");
-
-/**
- * Waits for a promise, but gives up as soon as the kill switch is engaged. Polls the switch every 100 ms, so a
- * model call or a tool call that is stuck cannot keep a paused runner busy.
- */
-export function raceKill<T>(promise: Promise<T>, pause: PauseSource | undefined): Promise<T | typeof KILLED> {
-  if (!pause) return promise;
-  return new Promise((resolve, reject) => {
-    const timer = setInterval(() => {
-      if (pause.isPaused()) {
-        clearInterval(timer);
-        resolve(KILLED);
-      }
-    }, 100);
-    promise.then(
-      (value) => {
-        clearInterval(timer);
-        resolve(value);
-      },
-      (error: unknown) => {
-        clearInterval(timer);
-        reject(error);
-      },
-    );
-  });
-}
+export { KILLED, raceKill };
 
 function stableJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
@@ -153,10 +128,13 @@ export async function runAgentLoop(options: LoopOptions): Promise<LoopResult> {
         proposed = await raceKill(withDeadline(model.nextAction({ testCase, stepIndex: index, stepText, actionsInStep: prior }), guard.remainingMs), options.pause);
       } catch (error) {
         if (!(error instanceof DeadlineExceeded)) throw error;
+        // Nobody is waiting for this call any more. A live client cancels it, so it does not go on sending prompts.
+        model.abort?.();
         stopForBudget({ reason: "timeout", detail: `time limit of ${config.budgets.maxWallMs} ms reached while waiting for the model` }, index);
         break stepLoop;
       }
       if (proposed === KILLED) {
+        model.abort?.();
         stopForKill(index);
         break stepLoop;
       }
@@ -244,7 +222,7 @@ export async function runAgentLoop(options: LoopOptions): Promise<LoopResult> {
       const stepLog = steps.flatMap((s) =>
         s.actions.map((a) => ({ step: s.index, tool: a.tool, args: scrub.scrubJson(a.args), ok: a.ok })),
       );
-      const batch = await judgeItems({ judge, caseId: testCase.id, items, stepLog, consoleErrors: access.consoleErrors(), guard, config, redactor: scrub });
+      const batch = await judgeItems({ judge, caseId: testCase.id, items, stepLog, consoleErrors: access.consoleErrors(), guard, config, redactor: scrub, ...(options.pause ? { pause: options.pause } : {}) });
       judgeStats.calls += 1;
       judgeStats.attempts += batch.attempts;
       judgeStats.errors.push(...batch.errors);

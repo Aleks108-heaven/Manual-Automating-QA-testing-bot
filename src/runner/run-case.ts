@@ -12,6 +12,7 @@ import type { PreflightReport } from "../preflight/report.ts";
 import { RunnerPausedError, type KillSwitch, type PauseSource } from "../ops/kill-switch.ts";
 import { configHash, type Config } from "../config.ts";
 import { botSourceHash } from "../version-stamp.ts";
+import { BOT_ROOT } from "../root.ts";
 import type { ModelClient } from "../model/client.ts";
 import { FileEvidenceSink } from "../oracle/evidence.ts";
 import { Redactor } from "../redact/redactor.ts";
@@ -274,6 +275,7 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
           try {
             const raced = await raceKill(withDeadline(work, guard.remainingMs), options.pause);
             if (raced === KILLED) {
+              proposer.abort?.();
               lateStop = "killed";
               asked = { body: null, attempts: 0, errors: ["the runner was paused by the kill switch while a proposal was being made"] };
             } else {
@@ -281,6 +283,7 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
             }
           } catch (error) {
             if (error instanceof DeadlineExceeded) {
+              proposer.abort?.();
               finalBudgetStop = { reason: "timeout", detail: `time limit of ${config.budgets.maxWallMs} ms reached while waiting for a proposal` };
               asked = { body: null, attempts: 1, errors: ["the time limit ran out while a proposal was being made"] };
             } else {
@@ -313,11 +316,14 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
 
       // A stop decided by the runner (the loop detector) leaves nothing for the model to report.
       if (loop.runnerStop === null && lateStop === null && finalBudgetStop === null && !loop.guardrailBlock && loop.stopSource !== "runner") {
-        const final = await requestFinalOutput({ model, testCase, actorStop: loop.actorStop, guard, config, redactor });
+        const final = await requestFinalOutput({ model, testCase, actorStop: loop.actorStop, guard, config, redactor, ...(options.pause ? { pause: options.pause } : {}) });
         modelOutput = { attempts: final.attempts, valid: final.output !== null, errors: final.errors };
         output = final.output;
-        if (final.budgetStop) finalBudgetStop = final.budgetStop;
+        if (final.killed) lateStop = "killed";
+        else if (final.budgetStop) finalBudgetStop = final.budgetStop;
         else if (!output) fail(`the model's final report stayed invalid after ${final.attempts} attempts (${final.errors[final.errors.length - 1] ?? "no detail"})`);
+        // The kill switch may have been engaged while a slow model was writing its report. Then the run stops, whatever the report says.
+        if (options.pause?.isPaused()) lateStop = "killed";
       }
     }
   } catch (error) {
@@ -388,19 +394,20 @@ export async function runCase(options: RunOptions): Promise<RunResult> {
     finished_at: new Date().toISOString(),
     target: targetOrigin,
     versions: {
-      bot: readVersion("package.json"),
-      bot_source_hash: botSourceHash(),
+      bot: readVersion(join(BOT_ROOT, "package.json")),
+      bot_source_hash: botSourceHash(BOT_ROOT),
       node: process.version,
-      playwright: readVersion("node_modules/playwright/package.json"),
-      axe_core: readVersion("node_modules/axe-core/package.json"),
+      playwright: readVersion(join(BOT_ROOT, "node_modules/playwright/package.json")),
+      axe_core: readVersion(join(BOT_ROOT, "node_modules/axe-core/package.json")),
       browser: access?.browserVersion ?? "not started",
       browser_sandbox: access?.browserSandbox ?? config.browser.sandbox,
       model_client: model.name,
       model_id: model.modelId,
       model_live: model.live,
       prompt_hashes: Object.fromEntries(
-        ["actor.v1.md", "judge.v1.md"].flatMap((f) => {
-          const h = sha256(join("prompts", f));
+        // The action protocol and the proposer prompt are wording only a live model is shown, so they are stamped only for a live run.
+        ["actor.v1.md", "judge.v1.md", ...(model.live ? ["actor-protocol.v1.md"] : []), ...(options.frozen?.proposer?.live ? ["proposer.v1.md"] : [])].flatMap((f) => {
+          const h = sha256(join(BOT_ROOT, "prompts", f));
           return h ? [[f, h]] : [];
         }),
       ),

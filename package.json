@@ -4,6 +4,10 @@
   "private": true,
   "type": "module",
   "description": "A bot that executes written test cases in a browser and reports verdicts with evidence.",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "engines": {
     "node": ">=24.2.0"
   },
@@ -19,7 +23,10 @@
     "container:run": "powershell -NoProfile -File scripts/container-run.ps1",
     "run-case": "node src/cli.ts run",
     "schemas": "node scripts/emit-schemas.ts",
-    "fixture": "node fixtures/site/server.ts"
+    "docs:sync": "node scripts/sync-manual-version.ts",
+    "docs:check": "node scripts/sync-manual-version.ts --check",
+    "fixture": "node fixtures/site/server.ts",
+    "mcp": "node mcp/server.ts"
   },
   "dependencies": {
     "axe-core": "4.14.0",

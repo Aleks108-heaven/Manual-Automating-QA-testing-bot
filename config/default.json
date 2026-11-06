@@ -41,6 +41,26 @@
     "accessibility": true,
     "maxFindings": 50
   },
+  "provider": {
+    "kind": "scripted",
+    "baseUrl": "http://127.0.0.1:1234/v1",
+    "modelId": null,
+    "judgeModelId": null,
+    "actionMode": "json",
+    "structuredOutput": true,
+    "vision": false,
+    "temperature": 0,
+    "seed": 7,
+    "maxOutputTokens": 1024,
+    "requestTimeoutMs": 120000,
+    "maxResponseBytes": 1000000,
+    "maxToolResultChars": 6000,
+    "maxEvidenceChars": 12000,
+    "contextTokens": 8192,
+    "pricing": { "inputPerMTok": 0, "outputPerMTok": 0 },
+    "apiKeySecret": null,
+    "registerEntry": null
+  },
   "judge": {
     "maxAttempts": 3
   },
@@ -56,7 +76,9 @@
     "navigationTimeoutMs": 10000
   },
   "browser": {
-    "sandbox": true
+    "sandbox": true,
+    "headed": false,
+    "slowMoMs": 0
   },
   "oracle": {
     "assertionTimeoutMs": 5000,

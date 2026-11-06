@@ -21,7 +21,15 @@ import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { CaseValidationError, loadCase } from "./cases/load.ts";
 import { negativeControl } from "./cases/mutate.ts";
-import { loadConfig } from "./config.ts";
+import { isLoopbackUrl, loadConfig, loadConfigForListing, loadConfigIgnoringProvider, loadConfigWith, modelChosenInEnvironment, type Config } from "./config.ts";
+import { exitCodeFor } from "./api.ts";
+import { cleanForTerminal } from "./report/sanitize.ts";
+import { assertFixtureTarget, TargetError } from "./target.ts";
+import { runBatch } from "./batch.ts";
+import { createLiveProvider, createProviderHttp, type LiveProvider } from "./provider.ts";
+import type { ModelClient } from "./model/client.ts";
+import type { JudgeClient } from "./judge/client.ts";
+import type { ProviderStatus } from "./preflight/provider.ts";
 import { formatGoldenReport, GoldenSetError, rehashGoldenSet, runGoldenSet } from "../evals/golden.ts";
 import { evaluateInjection, formatInjectionReport } from "../evals/injection.ts";
 import { evaluateMutants, formatMutantReport } from "../evals/mutants.ts";
@@ -63,6 +71,8 @@ const USAGE = `Usage: node src/cli.ts run <case.yaml>... [options]
        node src/cli.ts eval injection [--runs N] [--out-dir <dir>]
        node src/cli.ts golden [--file <set>] [--out-dir <dir>] [--for-resume]
        node src/cli.ts golden rehash [--file <set>]
+       node src/cli.ts provider models
+       node src/cli.ts provider check [--model <id>] [--judge-model <id>] [--probe-context]
        node src/cli.ts kill-switch status
        node src/cli.ts kill-switch engage --by <name> --reason <text>
        node src/cli.ts kill-switch resume --by <name> --review <ref> --fix <ref> --preflight-report <file> --golden-report <file>
@@ -75,6 +85,8 @@ Options:
   --negative-control     Make one expected result wrong. The bot must report FAIL.
   --mutate <id>          With --negative-control, choose which expected result to make wrong
   --target <url>         Use an already running fixture site instead of starting one
+  --live                 Use the model server in config provider (LM Studio, Ollama...) instead of the scripted fake. Also for preflight and frozen run
+  --model <id>           The model, as listed by "provider models" (or QA_PROVIDER_MODEL). --judge-model for the judge
 `;
 
 function usage(message?: string): never {
@@ -83,12 +95,117 @@ function usage(message?: string): never {
   process.exit(64);
 }
 
-function isLoopback(url: string): boolean {
+interface ProviderFlags {
+  live?: boolean;
+  model?: string;
+  "judge-model"?: string;
+  "probe-context"?: boolean;
+}
+
+/** The configuration, with the provider flags applied. --live means provider.kind openai-compatible; --model and --judge-model name models from the server's list. */
+function configFor(flags: ProviderFlags): Config {
+  const overrides: Record<string, string> = {};
+  if (flags.live) overrides["QA_PROVIDER"] = "openai-compatible";
+  if (flags.model) overrides["QA_PROVIDER_MODEL"] = flags.model;
+  if (flags["judge-model"]) overrides["QA_PROVIDER_JUDGE_MODEL"] = flags["judge-model"];
+  let config: Config;
   try {
-    const host = new URL(url).hostname;
-    return host === "127.0.0.1" || host === "localhost" || host === "[::1]";
-  } catch {
-    return false;
+    config = Object.keys(overrides).length > 0 ? loadConfigWith(overrides) : loadConfig();
+  } catch (error) {
+    // A provider setting the data handling rules refuse (a remote address without a register entry) is a usage problem, not a crash.
+    // Only an error about the provider section is one: the issues name their path, and for this section it starts with "provider".
+    if (error instanceof Error && /"provider"/.test(error.message)) usage(`The provider settings are not allowed:\n${error.message}`);
+    throw error;
+  }
+  // A model named for the scripted fake would be ignored without a word, and the run would look as if that model had done it.
+  if ((flags.model || flags["judge-model"]) && config.provider.kind === "scripted") usage("--model and --judge-model need a live provider: add --live (or set QA_PROVIDER=openai-compatible).");
+  return config;
+}
+
+interface ProviderParts {
+  provider: ProviderStatus;
+  /** Set when a live provider is used. */
+  live: LiveProvider | null;
+}
+
+/** The scripted fake by default, the live provider when the configuration says so. The canary cases get the same kind of model as the real run. */
+async function providerParts(config: Config): Promise<ProviderParts> {
+  if (config.provider.kind === "scripted") return { provider: new ScriptedProviderStatus(), live: null };
+  const live = await createLiveProvider(config);
+  return { provider: live.status, live };
+}
+
+/** The model for a case: the live model, or the scripted fake that plays the case's script file. */
+function modelForCase(parts: ProviderParts, scripted: (testCase: TestCase) => ModelClient): (testCase: TestCase) => ModelClient {
+  const live = parts.live;
+  return live ? () => live.newModel() : scripted;
+}
+
+function describeProvider(config: Config): string {
+  const p = config.provider;
+  if (p.kind === "scripted") return "scripted fake model (no language model)";
+  const where = isLoopbackUrl(p.baseUrl) ? "on this machine" : `OFF this machine (register entry: ${p.registerEntry ?? "none"})`;
+  return `${p.modelId} at ${p.baseUrl}, ${where}; judge ${p.judgeModelId ?? p.modelId}; mode ${p.actionMode}; images ${p.vision ? "yes" : "no"}`;
+}
+
+/** provider models | provider check: what the server offers, and whether the chosen model can be used. */
+async function providerCommand(action: string | undefined, flags: ProviderFlags): Promise<number> {
+  if (action !== "models" && action !== "check") return usage("Expected: provider models | provider check [--model <id>] [--judge-model <id>]");
+  // Listing the models is how one is chosen, so it must work before any is: it ignores the kind and the model names in the environment.
+  // Checking needs a chosen model.
+  let config: Config;
+  try {
+    config = action === "check" ? configFor({ ...flags, live: true }) : loadConfigForListing();
+  } catch (error) {
+    if (error instanceof Error && /"provider"/.test(error.message)) usage(`The provider settings are not allowed:\n${error.message}`);
+    throw error;
+  }
+  let http;
+  try {
+    http = await createProviderHttp(config);
+  } catch (error) {
+    console.error((error as Error).message);
+    return 64;
+  }
+  let listed: string[];
+  try {
+    listed = await http.listModels();
+  } catch (error) {
+    console.error(`${(error as Error).message}`);
+    console.error("Is the server running? In LM Studio start the local server (Developer tab); for Ollama run `ollama serve`. Set the address with QA_PROVIDER_URL.");
+    return 3;
+  }
+  if (action === "models") {
+    // A name from the server is data, like page text: it is cleaned before it reaches the terminal.
+    const chosen = flags.model ?? modelChosenInEnvironment();
+    console.log(`Models at ${config.provider.baseUrl}:`);
+    for (const id of listed) console.log(`  ${id === chosen ? "*" : " "} ${cleanForTerminal(id)}${/[:\-]cloud$/i.test(id) ? "   (runs off this machine)" : ""}`);
+    console.log(chosen ? `\n* is the chosen model. Choose another with --model <id> or QA_PROVIDER_MODEL.` : `\nNone is chosen. Pass --model <id> or set QA_PROVIDER_MODEL.`);
+    return 0;
+  }
+  console.log(`Provider: ${describeProvider(config)}`);
+  try {
+    const live = await createLiveProvider(config);
+    await live.status.ping();
+    console.log("OK: the server answered and lists the model(s) the run needs.");
+    if (flags["probe-context"]) {
+      // The server cuts a prompt that is longer than its context window without an error. This sends a long prompt and reads back how
+      // much of it the server took in. It is slow on a small machine (it loads the model and reads thousands of tokens).
+      console.log(`Probing the context: sending a prompt of about ${Math.floor(config.provider.contextTokens * 0.95)} tokens. This can take a few minutes...`);
+      const probe = await live.http.probeContext(config.provider.modelId as string, config.provider.contextTokens);
+      if (probe.reported === null) {
+        console.log("The server does not report how many prompt tokens it took in, so the context cannot be checked this way. Check the context length on the server by hand.");
+      } else if (probe.cut) {
+        console.error(`CONTEXT TOO SMALL: the server took in ${probe.reported} of about ${probe.sentAbout} prompt tokens. Its context window is smaller than provider.contextTokens (${config.provider.contextTokens}), and it would cut prompts from the front. Raise the context on the server (Ollama: OLLAMA_CONTEXT_LENGTH; LM Studio: the context length when the model is loaded), or lower QA_PROVIDER_CONTEXT to what the server really has.`);
+        return 2;
+      } else {
+        console.log(`OK: the server took in ${probe.reported} of about ${probe.sentAbout} prompt tokens, so its context holds at least the ${config.provider.contextTokens} declared.`);
+      }
+    }
+    return 0;
+  } catch (error) {
+    console.error(`NOT READY: ${(error as Error).message}`);
+    return 2;
   }
 }
 
@@ -102,27 +219,29 @@ function printPreflight(report: PreflightReport): void {
 
 /** Finds the target: an already running fixture (checked) or a new one. */
 async function resolveTarget(target: string | undefined, defects: string[]): Promise<{ targetOrigin: string; site: FixtureSite | null }> {
-  // Until M5 passes and the security review is done, the only allowed target is the local fixture site.
-  if (target && !isLoopback(target)) usage("The target must be the local fixture site (a loopback address). See CLAUDE.md.");
   if (!target) {
     const site = await startFixtureSite({ defects });
     return { targetOrigin: site.origin, site };
   }
-  const targetOrigin = new URL(target).origin;
-  // A loopback address is not enough: another local service (an admin panel, a database UI) is not the fixture.
-  const health = await fetch(`${targetOrigin}/health`, { signal: AbortSignal.timeout(3000) }).then((r) => r.json() as Promise<{ build?: string }>, () => null);
-  if (!health || typeof health.build !== "string" || !health.build.startsWith("fixture-")) {
-    usage(`${targetOrigin} does not identify itself as the fixture site (GET /health must report a build starting with "fixture-").`);
+  // Until M5 passes and the security review is done, the only allowed target is the local fixture site. A loopback address is not
+  // enough (another local service is not the fixture), so the target must say who it is. The library and the MCP server use the same check.
+  let targetOrigin: string;
+  try {
+    targetOrigin = await assertFixtureTarget(target);
+  } catch (error) {
+    if (error instanceof TargetError) usage(error.message);
+    throw error;
   }
   if (defects.length > 0) {
-    const config = loadConfig();
+    const config = loadConfigIgnoringProvider();
     await fetch(`${targetOrigin}/__test/defects`, { method: "POST", headers: { "content-type": "application/json", ...config.testApi.headers }, body: JSON.stringify({ defects }) });
   }
   return { targetOrigin, site: null };
 }
 
 async function killSwitchCommand(action: string | undefined, v: { by?: string; reason?: string; review?: string; fix?: string; "preflight-report"?: string; "golden-report"?: string; target?: string }): Promise<number> {
-  const config = loadConfig();
+  // The emergency stop does not depend on the model settings: a provider variable that is wrong must not stop it from working.
+  const config = loadConfigIgnoringProvider();
   const targetOrigin = v.target ? new URL(v.target).origin : "http://127.0.0.1:4173";
   const ks = new KillSwitch({ config, targetOrigin });
   try {
@@ -153,16 +272,6 @@ async function killSwitchCommand(action: string | undefined, v: { by?: string; r
   return usage("Expected: kill-switch status | engage | resume");
 }
 
-/**
- * The exit code for a report. 0 only when every planned case is PASS. 1 when any case is FAIL. 3 when nothing was
- * executed (the run was refused). 2 for anything else that is not verified.
- */
-function exitCodeFor(report: Report): number {
-  if (report.summary.executed === 0) return 3;
-  if (report.summary.by_verdict.FAIL > 0) return 1;
-  return report.summary.verified === report.summary.planned ? 0 : 2;
-}
-
 function emit(report: Report, runsDir: string): void {
   const written = writeReport(report, runsDir);
   console.log(formatReport(report));
@@ -170,8 +279,11 @@ function emit(report: Report, runsDir: string): void {
 }
 
 /** Runs one or more cases, one after another, each behind its own pre-flight check, and ends with one report. */
-async function runCommand(casePaths: string[], values: { script?: string; "judge-script"?: string; defects?: string; "negative-control"?: boolean; mutate?: string; target?: string }): Promise<number> {
+async function runCommand(casePaths: string[], values: ProviderFlags & { script?: string; "judge-script"?: string; defects?: string; "negative-control"?: boolean; mutate?: string; target?: string }): Promise<number> {
   if (new Set(casePaths).size !== casePaths.length) usage("The same case file was given twice.");
+  const config = configFor(values);
+  const isLive = config.provider.kind !== "scripted";
+  if (isLive && (values.script !== undefined || values["judge-script"] !== undefined)) usage("--script and --judge-script are for the scripted fake. A live provider has no script.");
   const loaded: Array<{ path: string; testCase: TestCase }> = [];
   const invalid = new Map<string, string>();
   for (const path of casePaths) {
@@ -193,11 +305,11 @@ async function runCommand(casePaths: string[], values: { script?: string; "judge
 
   const scriptFor = (c: TestCase) => values.script ?? `tests/ci/scripts/${c.id}.json`;
   for (const { testCase } of loaded) {
-    if (!existsSync(scriptFor(testCase))) usage(`No script found at ${scriptFor(testCase)}. Pass --script <file>.`);
+    if (!isLive && !existsSync(scriptFor(testCase))) usage(`No script found at ${scriptFor(testCase)}. Pass --script <file>.`);
   }
   const judgePath = values["judge-script"];
   if (judgePath !== undefined && !existsSync(judgePath)) usage(`No judge script found at ${judgePath}.`);
-  if (judgePath === undefined && loaded.some((l) => l.testCase.expected.some((e) => e.kind === "judged"))) {
+  if (!isLive && judgePath === undefined && loaded.some((l) => l.testCase.expected.some((e) => e.kind === "judged"))) {
     console.error("Note: a case has judged expected results and no --judge-script was given, so they will get NO_EVIDENCE and that run will be INCONCLUSIVE.\n");
   }
 
@@ -217,70 +329,33 @@ async function runCommand(casePaths: string[], values: { script?: string; "judge
   const { targetOrigin, site } = entries.length > 0 ? await resolveTarget(values.target, defects) : { targetOrigin: "", site: null };
 
   try {
-    const config = loadConfig();
-    const runDirs = new Map<string, string>();
-    const notRun = new Map<string, string>();
-    let stopped: string | null = null;
-    let printedPreflight = false;
-    for (const entry of entries) {
-      const id = entry.testCase.id;
-      // After a refusal the rest of the batch does not start. They are reported as planned and not executed.
-      if (stopped !== null) {
-        notRun.set(id, `not started, because ${stopped}`);
-        continue;
-      }
-      try {
-        const { runDir, preflight } = await orchestrateRun({
-          testCase: entry.testCase,
-          caseSource: entry.path,
-          targetOrigin,
-          config,
-          // The only valid target is the fixture site, whose credentials are fake.
-          secrets: new StaticSecretStore(FIXTURE_SECRETS),
-          // The canary cases use the same kind of model as the real run.
-          modelFor: (c) => ScriptedModelClient.fromFile(c.id === id ? scriptFor(entry.testCase) : `tests/ci/scripts/${c.id}.json`),
-          ...(judgePath !== undefined ? { judge: ScriptedJudge.fromFile(judgePath) } : {}),
-          provider: new ScriptedProviderStatus(),
-          killSwitch: new KillSwitch({ config, targetOrigin }),
-        });
-        runDirs.set(id, runDir);
-        if (!printedPreflight) printPreflight(preflight);
-        printedPreflight = true;
-      } catch (error) {
-        if (error instanceof PreflightFailedError) {
-          printPreflight(error.report);
-          console.error(error.message);
-          stopped = `the pre-flight check failed (${failedChecks(error.report).map((c) => c.name).join(", ")})`;
-          notRun.set(id, error.message);
-        } else if (error instanceof RunnerPausedError) {
-          console.error(error.message);
-          stopped = "the runner is paused by the kill switch";
-          notRun.set(id, error.message);
-        } else {
-          throw error;
-        }
-      }
-    }
-
-    // The report reads the stored run records, so what it shows is what was written to disk.
-    const plan: PlanEntry[] = casePaths.map((path) => {
-      const reason = invalid.get(path);
-      if (reason !== undefined) return { id: `invalid case file: ${path}`, source: path, notRunReason: `the case file is invalid and was rejected before its run: ${reason}` };
-      const e = entries.find((x) => x.path === path)!;
-      return {
-        id: e.testCase.id,
-        source: e.path,
-        title: e.testCase.title,
-        priority: e.testCase.priority,
-        ...(notRun.has(e.testCase.id) ? { notRunReason: notRun.get(e.testCase.id)! } : {}),
-        ...(e.control ? { control: e.control } : {}),
-      };
-    });
-    const report = buildReport({
-      reportId: newReportId(),
-      generatedAt: new Date().toISOString(),
-      plan,
-      runs: [...runDirs.values()].map((dir) => loadRun(dir)),
+    const parts = await providerParts(config);
+    // A live judge is used only when some case has a judged expected result.
+    const needsJudge = entries.some((e) => e.testCase.expected.some((x) => x.kind === "judged"));
+    const liveJudge: JudgeClient | null = parts.live && needsJudge ? parts.live.newJudge() : null;
+    if (parts.live) console.log(`Provider: ${describeProvider(config)}\n`);
+    const { report } = await runBatch({
+      order: casePaths,
+      entries: entries.map((entry) => ({
+        source: entry.path,
+        testCase: entry.testCase,
+        control: entry.control,
+        // The canary cases use the same kind of model as the real run.
+        modelFor: modelForCase(parts, (c) => ScriptedModelClient.fromFile(c.id === entry.testCase.id ? scriptFor(entry.testCase) : `tests/ci/scripts/${c.id}.json`)),
+        ...(liveJudge ? { judge: liveJudge } : judgePath !== undefined ? { judge: ScriptedJudge.fromFile(judgePath) } : {}),
+      })),
+      invalid,
+      targetOrigin,
+      config,
+      // The only valid target is the fixture site, whose credentials are fake.
+      secrets: new StaticSecretStore(FIXTURE_SECRETS),
+      provider: parts.provider,
+      onPreflightPassed: printPreflight,
+      onPreflightFailed: (preflight, message) => {
+        printPreflight(preflight);
+        console.error(message);
+      },
+      onPaused: (message) => console.error(message),
     });
     emit(report, config.runs.directory);
     // Every case file invalid is a usage error, not a refused run.
@@ -296,7 +371,7 @@ async function runCommand(casePaths: string[], values: { script?: string; "judge
  */
 function releaseCommand(reportPath: string | undefined, values: { register?: string; "cases-dir"?: string; today?: string }): number {
   if (!reportPath) usage("Expected: release <report.json or report directory> [--register <file>] [--cases-dir <dir>] [--today YYYY-MM-DD]");
-  const config = loadConfig();
+  const config = loadConfigIgnoringProvider();
   try {
     const file = existsSync(reportPath) && statSync(reportPath).isDirectory() ? join(reportPath, "report.json") : reportPath;
     if (!existsSync(file)) throw new ReleaseError(`there is no report at ${file}`);
@@ -341,8 +416,9 @@ function releaseCommand(reportPath: string | undefined, values: { register?: str
  * (nothing else makes a script runnable), and `run` replays an approved script with no model. A script that is not approved,
  * or whose file or case has changed, does not run, and the report lists the case as not executed.
  */
-async function frozenCommand(action: string | undefined, args: string[], values: { by?: string; today?: string; case?: string; "proposal-script"?: string; defects?: string; target?: string }): Promise<number> {
-  const config = loadConfig();
+async function frozenCommand(action: string | undefined, args: string[], values: ProviderFlags & { by?: string; today?: string; case?: string; "proposal-script"?: string; defects?: string; target?: string }): Promise<number> {
+  // Only a replay can use a live proposer. Freezing and approving do not touch a model, and must work whatever the provider settings are.
+  const config = action === "run" ? configFor(values) : loadConfigIgnoringProvider();
   const today = values.today ?? new Date().toISOString().slice(0, 10);
   // The case file is found by its id in the cases folder, unless --case names it. The ids that reach here have been checked
   // against the case id pattern, so an id from a file cannot point somewhere else.
@@ -433,7 +509,9 @@ async function frozenRun(casePath: string | undefined, values: { "proposal-scrip
     emit(buildReport({ reportId: newReportId(), generatedAt: new Date().toISOString(), plan: [{ ...plan, notRunReason: error.message }], runs: [] }), config.runs.directory);
     return 3;
   }
-  const proposer = values["proposal-script"] !== undefined ? ScriptedProposer.fromFile(values["proposal-script"]) : undefined;
+  const parts = await providerParts(config);
+  // With a live provider, a step that cannot run is diagnosed by the live model, and a person still approves what it proposes.
+  const proposer = values["proposal-script"] !== undefined ? ScriptedProposer.fromFile(values["proposal-script"]) : parts.live ? parts.live.newProposer() : undefined;
   const { targetOrigin, site } = await resolveTarget(values.target, defects);
   try {
     let runDir: string | null = null;
@@ -445,8 +523,8 @@ async function frozenRun(casePath: string | undefined, values: { "proposal-scrip
         targetOrigin,
         config,
         secrets: new StaticSecretStore(FIXTURE_SECRETS),
-        modelFor: (c) => (c.id === testCase.id ? new FrozenScriptModel(approved.script) : ScriptedModelClient.fromFile(`tests/ci/scripts/${c.id}.json`)),
-        provider: new ScriptedProviderStatus(),
+        modelFor: (c) => (c.id === testCase.id ? new FrozenScriptModel(approved.script) : modelForCase(parts, (x) => ScriptedModelClient.fromFile(`tests/ci/scripts/${x.id}.json`))(c)),
+        provider: parts.provider,
         killSwitch: new KillSwitch({ config, targetOrigin }),
         frozen: { script: approved.script, scriptHash: approved.scriptHash, caseHash: approved.caseHash, ...(proposer ? { proposer } : {}) },
       });
@@ -495,7 +573,7 @@ function reportCommand(runPaths: string[], values: { plan?: string }): number {
   }
   try {
     const report = buildReport({ reportId: newReportId(), generatedAt: new Date().toISOString(), plan, runs: runPaths.map((p) => loadRun(p)) });
-    emit(report, loadConfig().runs.directory);
+    emit(report, loadConfigIgnoringProvider().runs.directory);
     return exitCodeFor(report);
   } catch (error) {
     if (error instanceof ReportError) {
@@ -531,6 +609,10 @@ async function main(): Promise<number> {
       case: { type: "string" },
       out: { type: "string" },
       "for-resume": { type: "boolean", default: false },
+      live: { type: "boolean", default: false },
+      model: { type: "string" },
+      "judge-model": { type: "string" },
+      "probe-context": { type: "boolean", default: false },
       sample: { type: "string" },
       repeat: { type: "string" },
       runs: { type: "string" },
@@ -541,6 +623,7 @@ async function main(): Promise<number> {
   });
   if (values.help) usage();
   const [command, casePath] = positionals;
+  if (command === "provider") return providerCommand(casePath, values);
   if (command === "kill-switch") return killSwitchCommand(casePath, values);
   if (command === "preflight") return preflightCommand(values);
   if (command === "eval") return evalCommand(casePath, values);
@@ -552,8 +635,9 @@ async function main(): Promise<number> {
   return runCommand(positionals.slice(1), values);
 }
 
-async function preflightCommand(values: { cases?: string; out?: string; target?: string; "for-resume"?: boolean }): Promise<number> {
-  const config = loadConfig();
+async function preflightCommand(values: ProviderFlags & { cases?: string; out?: string; target?: string; "for-resume"?: boolean }): Promise<number> {
+  const config = configFor(values);
+  const parts = await providerParts(config);
   const { targetOrigin, site } = await resolveTarget(values.target, []);
   try {
     const planned = (values.cases ?? "").split(",").map((c) => c.trim()).filter(Boolean).map((p) => loadCase(p));
@@ -561,8 +645,8 @@ async function preflightCommand(values: { cases?: string; out?: string; target?:
       config,
       targetOrigin,
       secrets: new StaticSecretStore(FIXTURE_SECRETS),
-      modelFor: (c) => ScriptedModelClient.fromFile(`tests/ci/scripts/${c.id}.json`),
-      provider: new ScriptedProviderStatus(),
+      modelFor: modelForCase(parts, (c) => ScriptedModelClient.fromFile(`tests/ci/scripts/${c.id}.json`)),
+      provider: parts.provider,
       killSwitch: new KillSwitch({ config, targetOrigin }),
       plannedCases: planned,
       purpose: values["for-resume"] ? "resume" : "run",
@@ -587,7 +671,7 @@ function positiveInt(name: string, text: string | undefined): number | undefined
 async function evalCommand(suite: string | undefined, values: { sample?: string; repeat?: string; runs?: string; "out-dir"?: string; target?: string }): Promise<number> {
   if (suite !== "mutants" && suite !== "injection") return usage("Expected: eval mutants [--sample N] [--repeat R] [--out-dir <dir>] | eval injection [--runs N] [--out-dir <dir>]");
   if (values.target) usage("The eval suites start their own fixture site, so --target is not allowed.");
-  const config = loadConfig();
+  const config = loadConfigIgnoringProvider(); // the suites run on the scripted model
   const progress = (done: number, total: number) => {
     if (done % 25 === 0 || done === total) console.error(`  ${done} of ${total}`);
   };
@@ -655,7 +739,7 @@ async function evalCommand(suite: string | undefined, values: { sample?: string;
  * hashes of the case files and scripts after a person has reviewed a deliberate change. It never changes an expected verdict.
  */
 async function goldenCommand(action: string | undefined, values: { file?: string; "out-dir"?: string; "for-resume"?: boolean; target?: string }): Promise<number> {
-  const config = loadConfig();
+  const config = loadConfigIgnoringProvider(); // the golden set runs on the scripted model
   const file = values.file ?? config.evals.golden.file;
   if (action === "rehash") {
     const changed = rehashGoldenSet(file);

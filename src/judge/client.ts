@@ -46,4 +46,6 @@ export interface JudgeClient {
   judge(input: JudgeInput): Promise<unknown>;
   /** Tokens used since the last call, for the cost budget. Optional. */
   consumeUsage?(): ModelUsage | undefined;
+  /** Called when the runner gives up waiting for the judge (the kill switch, or the time budget). A live client cancels its requests. Optional. */
+  abort?(): void;
 }

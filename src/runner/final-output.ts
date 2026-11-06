@@ -3,6 +3,8 @@
 // field is not dropped. A bad report is sent back with a description of what was wrong (field names and
 // rules, never the values), within the same time and cost budget as everything else.
 import { BudgetGuard, DeadlineExceeded, withDeadline, type BudgetStop } from "../agent/budget.ts";
+import { KILLED, raceKill } from "../agent/race.ts";
+import type { PauseSource } from "../ops/kill-switch.ts";
 import type { Config } from "../config.ts";
 import type { ModelClient } from "../model/client.ts";
 import type { Redactor } from "../redact/redactor.ts";
@@ -17,6 +19,8 @@ export interface FinalOutputResult {
   errors: string[];
   /** Set when the budget ran out before a valid report arrived. */
   budgetStop: BudgetStop | null;
+  /** Set when the kill switch was engaged while the report was being written. The wait ended at once. */
+  killed?: boolean;
 }
 
 /** Turns a failed validation into a short description that names fields and rules but shows no values. */
@@ -31,6 +35,8 @@ export async function requestFinalOutput(args: {
   guard: BudgetGuard;
   config: Config;
   redactor: Redactor;
+  /** The kill switch. A model that takes minutes to write its report does not keep a paused runner busy. */
+  pause?: PauseSource;
 }): Promise<FinalOutputResult> {
   const { model, testCase, actorStop, guard, config, redactor } = args;
   const errors: string[] = [];
@@ -40,13 +46,19 @@ export async function requestFinalOutput(args: {
     const stop = guard.check(0);
     if (stop) return { output: null, attempts: attempt - 1, errors, budgetStop: stop };
 
-    let raw: unknown;
+    let waited;
     try {
-      raw = await withDeadline(model.finalOutput({ testCase, actorStop, attempt, previousError }), guard.remainingMs);
+      waited = await raceKill(withDeadline(model.finalOutput({ testCase, actorStop, attempt, previousError }), guard.remainingMs), args.pause);
     } catch (error) {
       if (!(error instanceof DeadlineExceeded)) throw error;
+      model.abort?.();
       return { output: null, attempts: attempt, errors, budgetStop: { reason: "timeout", detail: `time limit of ${config.budgets.maxWallMs} ms reached while waiting for the final report` } };
     }
+    if (waited === KILLED) {
+      model.abort?.();
+      return { output: null, attempts: attempt, errors, budgetStop: null, killed: true };
+    }
+    const raw: unknown = waited;
     guard.chargeUsage(model.consumeUsage?.());
 
     const parsed = ActorOutputSchema.safeParse(raw);
