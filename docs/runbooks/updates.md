@@ -23,10 +23,17 @@ Owner: the bot maintainer. Backup: the security reviewer. Last reviewed: 20 Oct 
 - A version published in the last few days, even if it looks harmless.
 - A lockfile diff far larger than the package change explains.
 
+## Watching automatically (added 6 Nov 2026)
+
+- `.github/dependabot.yml` makes GitHub open a pull request when a pinned npm package or GitHub Action has a newer version (waiting 14 days after its release, except for security fixes). It opens pull requests only; a person follows the routine above before merging. The Docker base image is left out on purpose, because its tag and digest move with Playwright (step 6).
+- `.github/workflows/supply-chain.yml` runs `check:pins` and `check:supply-chain` every Monday and on request. A red run means: read the advisory, then update that package by the routine above. It changes nothing in the repository.
+- The repository's own switch is separate and not in any file: in GitHub, Settings, Code security, turn on "Dependabot alerts" (and "Dependabot security updates"). Alerts then come to the owner by e-mail.
+- `npm audit` found `zod` 4.6.5 (GHSA-mrhx-c7xc-m3w5, memory exhaustion on oversized constrained collections) on 6 Nov 2026; it was updated to 4.6.7 the same day.
+
 ## Roll back
 
 `git revert` the update commit, run `npm ci`, and run `npm run check`.
 
 ## Machine hygiene
 
-This repository is private and is not published to npm, so no publish token should exist on the machine that builds it. Keep secrets out of the repository and out of `.env` files on shared machines. Use two-factor authentication on the code host, and review any new access token before creating it.
+This repository is public on GitHub and is not published to npm, so no publish token should exist on the machine that builds it. Keep secrets out of the repository and out of `.env` files on shared machines. Use two-factor authentication on the code host, and review any new access token before creating it.

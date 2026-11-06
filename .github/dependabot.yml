@@ -1,0 +1,24 @@
+# Dependabot only OPENS pull requests. It never merges anything: a person reads each one and follows
+# docs/runbooks/updates.md (one package at a time, lockfile diff reviewed, `npm run check` green).
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
+    # The runbook asks for a version that has been public for at least 14 days. Security updates ignore this delay.
+    cooldown:
+      default-days: 14
+
+  # Keeps the pinned commit of each GitHub Action in .github/workflows current.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 2
+    cooldown:
+      default-days: 14
+
+  # The Dockerfile base image is deliberately NOT listed. Its tag and digest must move together with the pinned
+  # Playwright version (docs/runbooks/updates.md, step 6), and a separate pull request would break that match.
