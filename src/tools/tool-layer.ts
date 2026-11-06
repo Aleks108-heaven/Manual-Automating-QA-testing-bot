@@ -100,17 +100,36 @@ export interface SharedBrowser {
   /** The allowlist entries (host or host:port) the browser's host rule was built from. */
   readonly entries: readonly string[];
   readonly sandbox: boolean;
+  /** Which browser it is: "chromium" (the one Playwright downloads) or an installed Chrome or Edge channel. */
+  readonly channel?: string;
   close(): Promise<void>;
 }
 
-export async function launchSharedBrowser(config: Config, entries: readonly string[]): Promise<SharedBrowser> {
-  const browser = await chromium.launch({
+/**
+ * How the browser is started. `browser.channel` picks the browser: "chromium" is the build Playwright downloads and pins, and the
+ * others (chrome, chrome-beta, chrome-dev, chrome-canary, msedge, msedge-beta, msedge-dev, msedge-canary) are the Chrome or Edge that is
+ * installed on this machine. All of them are Chromium, so the host rule that guards redirect hops works the same. Firefox and WebKit
+ * are not offered: that guard is a Chromium switch, and another browser would need another one.
+ */
+export function browserLaunchOptions(config: Config, args: string[]): Parameters<typeof chromium.launch>[0] {
+  return {
+    // Playwright adds --no-sandbox unless chromiumSandbox is true, so say it explicitly.
     chromiumSandbox: config.browser.sandbox,
     headless: !config.browser.headed,
     slowMo: config.browser.slowMoMs,
-    args: [`--host-resolver-rules=${hostResolverRules(entries)}`],
-  });
-  return { browser, entries: [...entries], sandbox: config.browser.sandbox, close: () => browser.close().catch(() => undefined) };
+    ...(config.browser.channel !== "chromium" ? { channel: config.browser.channel } : {}),
+    args,
+  };
+}
+
+/** What a report says the browser was: a channel is named, because Canary or Dev is not the pinned build and changes from day to day. */
+export function browserLabel(config: Config, version: string): string {
+  return config.browser.channel === "chromium" ? version : `${config.browser.channel} ${version}`;
+}
+
+export async function launchSharedBrowser(config: Config, entries: readonly string[]): Promise<SharedBrowser> {
+  const browser = await chromium.launch(browserLaunchOptions(config, [`--host-resolver-rules=${hostResolverRules(entries)}`]));
+  return { browser, entries: [...entries], sandbox: config.browser.sandbox, channel: config.browser.channel, close: () => browser.close().catch(() => undefined) };
 }
 
 export class ToolLayer {
@@ -161,16 +180,11 @@ export class ToolLayer {
       const uncovered = entries.filter((e) => !shared.entries.includes(e));
       if (uncovered.length > 0) throw new Error(`The shared browser was launched for other hosts. Its host rule does not cover: ${uncovered.join(", ")}.`);
       if (shared.sandbox !== options.config.browser.sandbox) throw new Error("The shared browser was launched with a different sandbox setting than this run's configuration.");
+      if ((shared.channel ?? "chromium") !== options.config.browser.channel) throw new Error("The shared browser is not the browser (channel) that this run's configuration names.");
       if (options.disableHostResolverRules) throw new Error("A shared browser always has the host rule, so disableHostResolverRules cannot be used with it.");
       browser = shared.browser;
     } else {
-      browser = await chromium.launch({
-        // Playwright adds --no-sandbox unless chromiumSandbox is true, so say it explicitly.
-        chromiumSandbox: options.config.browser.sandbox,
-        headless: !options.config.browser.headed,
-        slowMo: options.config.browser.slowMoMs,
-        args: options.disableHostResolverRules ? [] : [`--host-resolver-rules=${hostResolverRules(entries)}`],
-      });
+      browser = await chromium.launch(browserLaunchOptions(options.config, options.disableHostResolverRules ? [] : [`--host-resolver-rules=${hostResolverRules(entries)}`]));
     }
     // The raw HAR holds cookies and request bodies, so it goes to a private folder first. close() scrubs
     // it into the run directory and deletes the raw file. Playwright traces are not recorded at all.
@@ -424,7 +438,7 @@ export class ToolLayer {
         }
       },
       screenshot: () => this.maskedScreenshot(),
-      browserVersion: this.browser.version(),
+      browserVersion: browserLabel(this.options.config, this.browser.version()),
       browserSandbox: this.options.config.browser.sandbox,
       guardrails: this.guardrails,
       targetOrigin: this.options.targetOrigin,

@@ -29,6 +29,8 @@ export interface PreflightDeps {
   plannedCases: readonly TestCase[];
   /** Runs a case the way a real run would, and returns its verdict. Used for the canary pair. */
   runCanary: (testCase: TestCase) => Promise<Verdict>;
+  /** Text added to the canary check's detail when it passed, for example to say that a result from earlier in the batch was reused. */
+  canaryNote?: () => string;
   /** For tests: where the Dockerfile text comes from. */
   dockerfileText?: () => string | null;
   now?: () => Date;
@@ -192,7 +194,7 @@ export async function runPreflight(deps: PreflightDeps): Promise<PreflightReport
       if (good !== "PASS") problems.push(`${c.id} gave ${good}, expected PASS`);
       if (bad !== "FAIL") problems.push(`the negative control of ${c.id} gave ${bad}, expected FAIL${bad === "PASS" ? " (the bot passes a wrong expected result)" : ""}`);
     }
-    return problems.length > 0 ? failed(problems.join("; ")) : passed(lines.join("; "));
+    return problems.length > 0 ? failed(problems.join("; ")) : passed(`${lines.join("; ")}${deps.canaryNote?.() ?? ""}`);
   });
 
   const report = {

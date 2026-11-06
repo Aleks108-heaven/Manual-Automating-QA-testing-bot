@@ -26,6 +26,8 @@ Exit code 0 means no check failed. 2 means at least one failed. A skipped check 
 
 If any earlier check fails, the canaries are skipped, because their result would mean nothing.
 
+**Canaries in a batch.** A batch of several cases (`run a.yaml b.yaml c.yaml`) runs the canary pair once, before its first case. The later cases reuse the result, and their pre-flight report says "the canary pair ran earlier in this batch, so its result is reused". Every other check (the kill switch, the provider, the secrets, the target, the build) runs again for each case. The reuse ends with the batch. With a model on a laptop a canary pair takes minutes, so a batch of ten cases used to spend most of its time on ten identical canary pairs (this closes risk R9 of the M4 review, by a decision of the owner).
+
 ## Configuration
 
 `preflight` in `config/default.json`: `requireHealthEndpoint`, `expectedBuild`, `minQuotaUsd`, `requireContainer`, `requireCanaries`, `canaryCases`, `dockerfile`. Environment overrides: `QA_CANARY_CASES`, `QA_REQUIRE_CANARIES`, `QA_REQUIRE_CONTAINER`, `QA_RUNNER_IMAGE_DIGEST`. Changing what the pre-flight check requires is a change to the bot and goes through review, like a change to a prompt.

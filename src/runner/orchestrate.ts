@@ -2,6 +2,8 @@
 // only then does the case run. The command line uses this. Tests that exercise the runner directly use runCase.
 import { join } from "node:path";
 import type { Config } from "../config.ts";
+import { hashText, stableJson } from "../hash.ts";
+import type { Verdict } from "../schemas/common.ts";
 import type { JudgeClient } from "../judge/client.ts";
 import type { ModelClient } from "../model/client.ts";
 import { KillSwitch, RunnerPausedError } from "../ops/kill-switch.ts";
@@ -36,7 +38,15 @@ export interface OrchestrateOptions {
   buildProbe?: BuildProbe;
   /** Replay an approved frozen script. `modelFor` must give that script's FrozenScriptModel for the case. */
   frozen?: NonNullable<RunOptions["frozen"]>;
+  /**
+   * The canary runs already made in this batch. A batch runs the canary pair once, before its first case, and the later cases reuse
+   * the result (every other check still runs for each case). Without a memo every run makes its own canary runs.
+   */
+  canaryMemo?: CanaryMemo;
 }
+
+/** The verdict of each canary run made so far in one batch, by the canary's content. A canary that was changed is a different canary. */
+export type CanaryMemo = Map<string, Verdict>;
 
 /** Runs the pre-flight check for the given cases and writes its report. Does not start a run. */
 export async function preflightFor(
@@ -48,7 +58,9 @@ export async function preflightFor(
   // The canaries run in their own folder so they do not mix with real runs.
   const canaryConfig: Config = structuredClone(config);
   canaryConfig.runs.directory = join(config.runs.directory, "canary");
+  let reused = false;
   const report = await runPreflight({
+    canaryNote: () => (reused ? " (the canary pair ran earlier in this batch, so its result is reused)" : ""),
     config,
     targetOrigin,
     pause: options.killSwitch,
@@ -57,8 +69,14 @@ export async function preflightFor(
     secrets: options.secrets,
     probe,
     plannedCases: options.plannedCases,
-    runCanary: async (canary) =>
-      (
+    runCanary: async (canary) => {
+      const key = hashText(stableJson(canary));
+      const known = options.canaryMemo?.get(key);
+      if (known !== undefined) {
+        reused = true;
+        return known;
+      }
+      const verdict = (
         await runCase({
           testCase: canary,
           caseSource: "canary",
@@ -70,7 +88,10 @@ export async function preflightFor(
           // A check made to resume the kill switch has to run canaries while the switch is still engaged.
           ...(purpose === "resume" ? {} : { pause: options.killSwitch }),
         })
-      ).record.verdict,
+      ).record.verdict;
+      options.canaryMemo?.set(key, verdict);
+      return verdict;
+    },
   });
   writePreflightReport(report, options.reportPath ?? join(config.runs.directory, "preflight-latest.json"));
   return report;

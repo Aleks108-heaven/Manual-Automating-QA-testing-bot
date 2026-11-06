@@ -77,6 +77,7 @@
   },
   "browser": {
     "sandbox": true,
+    "channel": "chromium",
     "headed": false,
     "slowMoMs": 0
   },

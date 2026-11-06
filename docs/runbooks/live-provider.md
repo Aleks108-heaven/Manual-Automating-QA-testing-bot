@@ -34,14 +34,17 @@ Use one model server at a time: close LM Studio, and do not load other models. T
    node src/cli.ts provider check --model qwen2.5-coder:14b-instruct-q4_K_M --probe-context
    ```
    The probe loads the model and reads a long prompt, so it takes a while. It must say that the server took in the declared context.
-3. Watch a run. The browser window is shown and each action is slowed down. The canary pair is skipped for this first look only (it runs the model twice more); put it back for real runs.
+3. Watch a run. The browser window is shown and each action is slowed down. **Do not touch the window, not even its address bar**: a page opened there is a navigation like any other, and one outside the allowed host ends the run as INCONCLUSIVE (this happened in the first try).
    ```powershell
    $env:QA_BROWSER_HEADED = "1"; $env:QA_BROWSER_SLOWMO_MS = "600"
-   $env:QA_REQUIRE_CANARIES = "0"; $env:QA_CANARY_CASES = ""
    node src/cli.ts run cases/TC-FORM-001.yaml --live --model qwen2.5-coder:14b-instruct-q4_K_M
-   node src/cli.ts run cases/TC-FORM-001.yaml --live --model qwen2.5-coder:14b-instruct-q4_K_M --negative-control
    ```
-   The first must end PASS and the second FAIL. The report header says `(live)`. If the model cannot follow the format, the run ends INCONCLUSIVE or BLOCKED with the reason, never PASS.
+   Before the case, the pre-flight check runs the canary pair with the same model (the known-good case must PASS and its negative control must FAIL), which takes about five minutes on a laptop CPU; the case itself about two. The result must be `Verdict: PASS`, and the report header says `(live)`. If the model cannot follow the format, the run ends INCONCLUSIVE or BLOCKED with the reason, never PASS. In a batch of several cases the canary pair runs once, before the first case.
+
+   To skip the canary pair for a look (not for real runs), use `$env:QA_REQUIRE_CANARIES = "0"; $env:QA_CANARY_CASES = ","`. Use the comma: an empty value can disappear from a PowerShell session, and then the default canary comes back.
+4. To see that the bot can fail with a live model too: `node src/cli.ts run cases/TC-FORM-001.yaml --live --model qwen2.5-coder:14b-instruct-q4_K_M --negative-control` must end `Verdict: FAIL`.
+
+Writing your own cases: [writing-and-running-cases.md](writing-and-running-cases.md).
 
 ## Settings (config `provider`, with environment overrides)
 

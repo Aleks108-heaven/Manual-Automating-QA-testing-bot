@@ -13,7 +13,7 @@ import type { PreflightReport } from "./preflight/report.ts";
 import { buildReport, loadRun, type PlanEntry } from "./report/build.ts";
 import type { Report } from "./report/schema.ts";
 import { newReportId } from "./report/write.ts";
-import { orchestrateRun, PreflightFailedError } from "./runner/orchestrate.ts";
+import { orchestrateRun, PreflightFailedError, type CanaryMemo } from "./runner/orchestrate.ts";
 import type { TestCase } from "./schemas/case.ts";
 import type { SecretStore } from "./secrets/store.ts";
 
@@ -58,6 +58,9 @@ export async function runBatch(options: BatchOptions): Promise<BatchResult> {
   const notRun = new Map<string, string>();
   let stopped: string | null = null;
   let printedPreflight = false;
+  // The canary pair is run once for the batch, before its first case. A case later in the batch reuses the result, and every other
+  // pre-flight check (the kill switch, the provider, the target, the build) still runs for each case.
+  const canaryMemo: CanaryMemo = new Map();
   for (const entry of options.entries) {
     const id = entry.testCase.id;
     if (stopped !== null) {
@@ -75,6 +78,7 @@ export async function runBatch(options: BatchOptions): Promise<BatchResult> {
         ...(entry.judge ? { judge: entry.judge } : {}),
         provider: options.provider,
         killSwitch: options.killSwitchFor ? options.killSwitchFor() : new KillSwitch({ config, targetOrigin }),
+        canaryMemo,
       });
       runDirs.set(id, runDir);
       if (!printedPreflight) options.onPreflightPassed?.(preflight);

@@ -1,17 +1,60 @@
 # QA automation bot
 
-A bot that executes written test cases in a browser and reports a verdict with evidence. The design is in [docs/manual/](docs/manual/00-index.md), and the build plan is in [docs/build-brief.md](docs/build-brief.md).
+A bot that executes written test cases in a browser and reports a verdict with evidence.
 
-**Status: milestones M1 to M5 are built** (the thin slice; sessions, secrets, scrubbing and budgets; the judge, implicit checks and validated output; undeclared-change blocking, the pre-flight check and the kill switch; the golden set, the injection eval and the mutant eval). The bot runs cases against a local fixture site with a *scripted fake model and judge*. No API key, no cost, and no real application is involved. A live model and judge, the final report, and frozen scripts come in later milestones. **Every number the eval suites print today describes the bot's machinery, not a language model.**
+You write a case as a small YAML file. A local language model (LM Studio or Ollama) reads the steps and drives a real browser. **The bot's own code, not the model, checks the expected results, captures the evidence and decides the verdict.** The model only reports what it saw, and it can never turn a failed check into a PASS. Only PASS is verified; everything else (FAIL, BLOCKED, INCONCLUSIVE, INCOMPLETE) needs a person.
 
-## Run it
+**Status (6 Nov 2026).** Milestones M1 to M7 are built, with a live model client for LM Studio and Ollama, a library entry point and an MCP server. A first real run: Qwen2.5-Coder 14B on a laptop CPU passed the known-good case, failed its negative control as it must, and passed `TC-FORM-001`, in about six minutes in all. That is one case on the fixture site, not an evaluation. **Only the local fixture site is a valid target** until the security review of a real target is done. The eval suites (golden set, mutants, injection) still run on the scripted fake model, so every number they print describes the bot's machinery, not a language model.
+
+The design is in [docs/manual/](docs/manual/00-index.md), and the build plan is in [docs/build-brief.md](docs/build-brief.md).
+
+## Quick start
 
 Needs Node 24.2 or newer.
 
 ```powershell
 npm install
-npx playwright install chromium      # one-time download of the pinned browser
-npm run check                        # type check, pin check, and all CI tests (about ten minutes)
+npx playwright install chromium     # one-time download of the pinned browser
+```
+
+**1. Try it with no model at all** (a scripted fake plays the model; nothing to set up):
+
+```powershell
+node src/cli.ts cases                                         # list the cases, and check that they are valid
+node src/cli.ts run cases/TC-FORM-001.yaml                    # expect PASS
+node src/cli.ts run cases/TC-FORM-001.yaml --negative-control # one expected result made wrong: expect FAIL
+```
+
+**2. Run it with a local model.** Start Ollama (or LM Studio), then:
+
+```powershell
+$env:QA_PROVIDER_URL = "http://127.0.0.1:11434/v1"     # Ollama; LM Studio is http://127.0.0.1:1234/v1
+node src/cli.ts provider models                          # the models the server offers
+node src/cli.ts run cases/TC-FORM-001.yaml --live --model <a name from that list>
+```
+
+The one-time setup (context length, timeouts, watching the browser) is in [docs/runbooks/live-provider.md](docs/runbooks/live-provider.md). Add `QA_BROWSER_HEADED=1` to watch the browser, and do not touch its window.
+
+**3. Write your own case.** A case is one `.yaml` file in [cases/](cases/). Copy [TC-FORM-001.yaml](cases/TC-FORM-001.yaml), change it, check it with `node src/cli.ts cases cases/<yours>.yaml`, prove it can fail with `--negative-control`, then run it. The step-by-step guide, with a template, is [docs/runbooks/writing-and-running-cases.md](docs/runbooks/writing-and-running-cases.md); the full rules are on the manual page [Writing bot-ready test cases](docs/manual/06-writing-bot-ready-test-cases.md).
+
+**4. Use it from somewhere else.** From VS Code agent mode, LM Studio or Claude Code through an MCP server (`npm run mcp -- --live --model <id>`), or as a library from your own application (`QaBot` in `src/index.ts`): [docs/runbooks/agent-integration.md](docs/runbooks/agent-integration.md).
+
+| Command | What it does |
+| --- | --- |
+| `node src/cli.ts cases [files]` | List the cases, or check files, without running anything |
+| `node src/cli.ts run <case.yaml>... [--live --model <id>] [--negative-control]` | Run one case or several (one after another, one report) |
+| `node src/cli.ts provider models` / `provider check --model <id> [--probe-context]` | See the model server's models; check a model, and that the server holds the context you declared |
+| `node src/cli.ts report <run dir>...` / `release <report>` | Rebuild a report; the evidence for a release decision (it never says go or no-go) |
+| `node src/cli.ts kill-switch status\|engage\|resume` | Pause the bot at once, or resume it by the documented steps |
+| `node src/cli.ts frozen freeze\|approve\|run` | Freeze a stable case as a script that replays with no model |
+| `npm run check` | Type check, pin check and all CI tests (about 16 minutes) |
+
+Which browser: the pinned Chromium by default; `QA_BROWSER_CHANNEL=chrome-canary` (or `chrome`, `chrome-dev`, `msedge-dev`, `msedge`) uses the Chrome or Edge installed on the machine, for compatibility checks. Firefox and WebKit are not offered.
+
+## Scripted demo and checks (details)
+
+```powershell
+npm run check                        # type check, pin check, and all CI tests (about sixteen minutes)
 ```
 
 Run a case. The command starts the fixture site itself, runs the case in a real browser, and prints the verdict and where the evidence is:
@@ -33,16 +76,26 @@ If the negative control ever reports PASS, the bot is broken. Stop and fix it be
 
 ## What is not built yet
 
-The manual describes the finished bot, and some of it is not built. Do not rely on these until their milestone:
+The manual describes the finished bot, and some of it is not built. Do not rely on these yet:
 
-- The judge is a scripted fake. A live judge needs the provider decision, and its prompt (`prompts/judge.v1.md`) has never been tried on a real model. The live ("Eval") halves of T6, T7 and T23 wait for that.
-- The secret manager is an environment-variable store, and the real one is a decision still open. The provider status for the pre-flight check is a scripted fake, and the kill switch is a local file, which a shared runner cannot use.
+- **Live evaluation.** The live model client is built and has run one case on a real model, but the eval suites (golden set, mutants, injection) and the live halves of T6, T7, T12, T13, T19 and T23 still run on the scripted model. The judge's prompt (`prompts/judge.v1.md`) has never been tried on a real model. Scripted results test the machinery and never fill a pilot gate.
+- **Targets.** Only the local fixture site is allowed. A real application needs the security review first.
+- The secret manager is an environment-variable store, and the real one is a decision still open. The kill switch is a local file, which a shared runner cannot use.
 - The container runner has still never been built or run (Docker was not running). The pre-flight image check compares against its digest only when the configuration requires a container.
 - A chain of more than one redirect after a declared POST is noticed after the later request was sent, not before.
-- The only model is the scripted fake. No live model has been run, so the cost figures are computed from usage that the test scripts invent.
 - Sessions are made through the application's login API. A UI or single-sign-on login is not built.
+- Cases run one at a time: one local model answers one request at a time. Firefox and WebKit are not supported.
 
 Reviews: [docs/m1-review.md](docs/m1-review.md), [docs/m2-review.md](docs/m2-review.md) (read its list of residual risks, for example secrets shown as page text still appear in screenshots), and [docs/security-hardening.md](docs/security-hardening.md).
+
+## What came after M5
+
+- **M6, the report.** A run report with version stamps, a summary, per-case detail and a draft bug report for a FAIL; a release report that gathers the evidence for a release decision and never decides.
+- **M7, frozen scripts.** A stable case is exported as a script, a named approver approves it, and it replays through the same runner with no model. A failed assertion in a script stays FAIL.
+- **A live model.** A client for any OpenAI-compatible server (LM Studio, Ollama, llama.cpp, vLLM) serves the actor, the judge and the proposer. The model is chosen by name from the server's list. Its answers are validated and sent back, never repaired. A provider off this machine needs a register entry and https. Every prompt is fitted to the context length you declare, or refused, so the server never cuts it silently. [Runbook](docs/runbooks/live-provider.md).
+- **A library and an MCP server.** `QaBot` for your own application, and an MCP server with coarse tools only (list the cases, run one by id, read a report); the host's model never drives the browser. [Runbook](docs/runbooks/agent-integration.md).
+- **For the tester.** `node src/cli.ts cases` lists and checks cases without running them; a batch runs the canary pair once; the browser can be shown or chosen. [Guide](docs/runbooks/writing-and-running-cases.md).
+- The manual's version follows the last row of its change log (`npm run docs:sync`, checked by a test).
 
 ## What M2 added
 
@@ -106,16 +159,19 @@ Check that nothing leaked, after any run: `Select-String -Path (Get-ChildItem ru
 ## Layout
 
 ```text
-cases/            YAML test cases
+cases/            YAML test cases (add yours here)
 config/           every value the manual marks [to fill]
-docs/             the manual (one file per page), the build brief, the design review log
+docs/             the manual (one file per page), the runbooks, the build brief, the design review log
 evals/            the three eval suites (mutants, golden set, injection); they use the fixture, so they live outside src/
 fixtures/         the local fixture site (toggleable defects, trap pages, hostile pages), the defect registry, the mutant manifest
+frozen/           approved frozen scripts and their register (created by the first freeze)
+release/          the register of quarantines and overrides
 golden/           the frozen verdicts and their scripts
-prompts/          the actor and judge prompts (the source of truth)
-scripts/          the pin checker
-src/              schemas, cases, tools, model, agent, oracle, verdict, runner, cli
-tests/ci/         deterministic tests (scripted model, fixture site)
+mcp/              the MCP server for VS Code, LM Studio and Claude Code
+prompts/          the actor, judge and proposer prompts (the source of truth)
+scripts/          the pin checker, the schema writer, the manual-version sync
+src/              schemas, cases, tools, model (scripted and live), judge, agent, oracle, verdict, runner, batch, report, release, frozen, cli, and index.ts (the library)
+tests/ci/         deterministic tests (scripted model or a fake model server, and the fixture site)
 archive/          earlier versions of the documents
 ```
 

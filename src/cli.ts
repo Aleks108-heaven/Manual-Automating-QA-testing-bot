@@ -16,11 +16,11 @@
 // Exit codes: 0 every planned case is PASS, 1 any case is FAIL, 2 anything else that is not verified (BLOCKED,
 // INCONCLUSIVE, INCOMPLETE, or a case that did not run), 3 nothing ran because the run was refused (kill switch
 // engaged, or a pre-flight check failed), 64 usage error, 70 unexpected error.
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { CaseValidationError, loadCase } from "./cases/load.ts";
-import { negativeControl } from "./cases/mutate.ts";
+import { mutateExpected, negativeControl } from "./cases/mutate.ts";
 import { isLoopbackUrl, loadConfig, loadConfigForListing, loadConfigIgnoringProvider, loadConfigWith, modelChosenInEnvironment, type Config } from "./config.ts";
 import { exitCodeFor } from "./api.ts";
 import { cleanForTerminal } from "./report/sanitize.ts";
@@ -59,7 +59,8 @@ import { approveProposal, approveScript, FrozenError, loadApprovedScript, loadFr
 import { startOutsideServer } from "../fixtures/outside-server.ts";
 import { assertKnownDefects, startFixtureSite, type FixtureSite } from "../fixtures/site/server.ts";
 
-const USAGE = `Usage: node src/cli.ts run <case.yaml>... [options]
+const USAGE = `Usage: node src/cli.ts cases [<case.yaml>...]       list the cases, or check the given files, without running them
+       node src/cli.ts run <case.yaml>... [options]
        node src/cli.ts report <run directory or run.json>... [--plan a.yaml,b.yaml]
        node src/cli.ts release <report.json or report directory> [--register <file>] [--cases-dir <dir>] [--today YYYY-MM-DD]
        node src/cli.ts frozen freeze <case.yaml> <run directory>...
@@ -207,6 +208,51 @@ async function providerCommand(action: string | undefined, flags: ProviderFlags)
     console.error(`NOT READY: ${(error as Error).message}`);
     return 2;
   }
+}
+
+/**
+ * cases | cases <file>...: lists the cases in the cases folder, or checks the files given, without running anything. A case that does not
+ * validate is shown with its reasons. A tester runs this after writing a case, before the first run.
+ */
+function casesCommand(files: string[]): number {
+  const config = loadConfigIgnoringProvider();
+  const listing = files.length === 0;
+  let paths = files;
+  if (listing) {
+    const dir = config.release.casesDirectory;
+    if (!existsSync(dir)) usage(`There is no cases folder at ${dir}.`);
+    paths = readdirSync(dir).filter((name) => /\.ya?ml$/.test(name)).sort().map((name) => join(dir, name));
+    if (paths.length === 0) {
+      console.log(`No case files in ${dir}. A case is a .yaml file there: see docs/runbooks/writing-and-running-cases.md.`);
+      return 0;
+    }
+    console.log(`Cases in ${dir}:`);
+  }
+  let invalid = 0;
+  const ids = new Map<string, string>();
+  for (const path of paths) {
+    try {
+      const c = loadCase(path);
+      const kinds = [...new Set(c.expected.map((e) => e.kind))];
+      const earlier = ids.get(c.id);
+      ids.set(c.id, path);
+      console.log(`  ok       ${c.id.padEnd(13)} ${c.priority}  ${cleanForTerminal(c.title)}`);
+      console.log(`           ${c.steps.length} step(s), ${c.expected.length} expected result(s) (${kinds.join(", ")}), role ${c.role}${c.allowed_mutations.length > 0 ? `, may send ${c.allowed_mutations.join(", ")}` : ", sends no state-changing request"}  [${path}]`);
+      if (earlier !== undefined) {
+        invalid += 1;
+        console.log(`           PROBLEM: the id ${c.id} is also used by ${earlier}. Two cases with one id cannot run in the same batch.`);
+      }
+      if (c.expected.some((e) => e.kind === "judged")) console.log("           note: has judged results. They need a judge model (--live gives one); with the scripted fake they get NO_EVIDENCE.");
+      if (!c.expected.some((e) => mutateExpected(e) !== null)) console.log("           note: no expected result can be made wrong, so --negative-control cannot be used on this case.");
+    } catch (error) {
+      if (!(error instanceof CaseValidationError)) throw error;
+      invalid += 1;
+      console.log(`  INVALID  ${path}`);
+      for (const issue of error.issues) console.log(`           - ${issue.path || "(case)"}: ${cleanForTerminal(issue.message)}`);
+    }
+  }
+  console.log(`\n${paths.length} case file(s), ${invalid} with a problem.${invalid > 0 ? "" : " Next: node src/cli.ts run <file> --negative-control (must give FAIL), then run it for real."}`);
+  return invalid > 0 ? 64 : 0;
 }
 
 function printPreflight(report: PreflightReport): void {
@@ -623,6 +669,7 @@ async function main(): Promise<number> {
   });
   if (values.help) usage();
   const [command, casePath] = positionals;
+  if (command === "cases") return casesCommand(positionals.slice(1));
   if (command === "provider") return providerCommand(casePath, values);
   if (command === "kill-switch") return killSwitchCommand(casePath, values);
   if (command === "preflight") return preflightCommand(values);

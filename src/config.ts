@@ -167,6 +167,10 @@ const ConfigSchema = z.strictObject({
     // Playwright turns the Chromium sandbox OFF unless it is asked to turn it on, so the bot asks.
     // false is only for a container that already isolates the browser, and every run record says so.
     sandbox: z.boolean(),
+    // Which browser. "chromium" is the build Playwright downloads (npx playwright install chromium) and the only one that is pinned.
+    // The others are the Chrome or Edge installed on this machine: Canary and Dev change from day to day, so they suit a check of
+    // compatibility and not an official run (a configuration that requires the pinned container image may not use them). All are Chromium.
+    channel: z.enum(["chromium", "chrome", "chrome-beta", "chrome-dev", "chrome-canary", "msedge", "msedge-beta", "msedge-dev", "msedge-canary"]),
     // Show the browser window, to watch a run. Nothing else changes: the same tools, rules and checks apply.
     headed: z.boolean(),
     // Pause between browser actions, in milliseconds, so a watched run can be followed. 0 for none.
@@ -305,6 +309,7 @@ export function configHash(config: Config): string {
  *   QA_PROVIDER_CONTEXT         provider.contextTokens, the context length set on the model server
  *   QA_PROVIDER_TIMEOUT_MS      provider.requestTimeoutMs
  *   QA_MAX_WALL_MS              budgets.maxWallMs, the time one run may take
+ *   QA_BROWSER_CHANNEL          chromium (default), chrome, chrome-dev, chrome-canary, msedge, msedge-dev, ... (browser.channel)
  *   QA_BROWSER_HEADED=1         show the browser window (to watch a run)
  *   QA_BROWSER_SLOWMO_MS        pause between browser actions, in milliseconds
  */
@@ -359,6 +364,7 @@ export function loadConfig(path = "config/default.json", env: NodeJS.ProcessEnv 
   if (env["QA_PROVIDER_CONTEXT"]) config.provider.contextTokens = Number(env["QA_PROVIDER_CONTEXT"]);
   if (env["QA_PROVIDER_TIMEOUT_MS"]) config.provider.requestTimeoutMs = Number(env["QA_PROVIDER_TIMEOUT_MS"]);
   if (env["QA_MAX_WALL_MS"]) config.budgets.maxWallMs = Number(env["QA_MAX_WALL_MS"]);
+  if (env["QA_BROWSER_CHANNEL"]) config.browser.channel = env["QA_BROWSER_CHANNEL"] as typeof config.browser.channel;
   if (env["QA_BROWSER_HEADED"] === "1") config.browser.headed = true;
   if (env["QA_BROWSER_SLOWMO_MS"]) config.browser.slowMoMs = Number(env["QA_BROWSER_SLOWMO_MS"]);
   // A live provider has its own prices. The global ones are placeholders for the fixture and are used only with the scripted fake.
@@ -370,6 +376,10 @@ export function loadConfig(path = "config/default.json", env: NodeJS.ProcessEnv 
   // A runner that must be the pinned container is a real environment. It may not also skip the canaries.
   if (checked.preflight.requireContainer && (!checked.preflight.requireCanaries || checked.preflight.canaryCases.length === 0)) {
     throw new Error("Invalid configuration: a configuration that requires the container runner must also require at least one canary case (preflight.requireCanaries and preflight.canaryCases).");
+  }
+  // The pinned container image is the pinned browser too. Chrome Canary or Edge Dev on the host is not.
+  if (checked.preflight.requireContainer && checked.browser.channel !== "chromium") {
+    throw new Error(`Invalid configuration: a configuration that requires the pinned container image must use the browser that is pinned with it (browser.channel "chromium"), not "${checked.browser.channel}".`);
   }
   return checked;
 }
