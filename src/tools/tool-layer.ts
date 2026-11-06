@@ -4,7 +4,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser, type BrowserContext, type Frame, type Locator, type Page, type Route } from "playwright";
-import type { Config } from "../config.ts";
+import { allowlistEntryFor, type Config } from "../config.ts";
 import { Redactor } from "../redact/redactor.ts";
 import { describeWhere, type Where } from "../schemas/common.ts";
 import type { GuardrailEvent } from "../schemas/run-record.ts";
@@ -166,7 +166,8 @@ export class ToolLayer {
   }
 
   static async create(options: ToolLayerOptions): Promise<ToolLayer> {
-    const entries = [new URL(options.targetOrigin).host, ...options.config.allowlist.hosts];
+    // Host and port. An address with no port (https://shop.example.com) means the scheme's port, not every port of the host.
+    const entries = [allowlistEntryFor(options.targetOrigin), ...options.config.allowlist.hosts];
     const allowlist = new Allowlist(entries, options.config.allowlist.schemes);
     mkdirSync(join(options.runDir, "shots"), { recursive: true });
 

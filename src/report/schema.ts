@@ -178,6 +178,8 @@ export const ReportSchema = z
       preflight: z.strictObject({ runs_after_passed_preflight: z.number().int(), executed: z.number().int() }),
       /** True when any actor or judge was a scripted fake rather than a language model. */
       scripted: z.boolean(),
+      /** Facts about the whole report that are not in a run record. For a run on an external target: what the target was and who attested that the test was allowed. Absent when there are none. */
+      notes: z.array(z.string().max(1000)).optional(),
     }),
     summary: SummarySchema,
     cases: z.array(CaseEntrySchema).min(1),

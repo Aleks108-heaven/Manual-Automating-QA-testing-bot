@@ -1,0 +1,9 @@
+{
+  "case_id": "TC-SRCH-001",
+  "steps": [
+    [{ "tool": "goto", "args": { "url": "/search" } }],
+    [{ "tool": "fill", "args": { "target": { "role": "searchbox", "name": "Search" }, "value": "notebook" } }],
+    [{ "tool": "click", "args": { "target": { "role": "button", "name": "Search" } } }]
+  ],
+  "observations": []
+}

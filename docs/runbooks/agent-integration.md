@@ -19,7 +19,7 @@ import { QaBot } from "qa-automation-bot"; // src/index.ts
 
 const bot = await QaBot.create(); // the live provider from config/default.json and QA_PROVIDER_* variables
 const result = await bot.run({
-  target: "http://127.0.0.1:4173", // only the local fixture site is accepted
+  target: "http://127.0.0.1:4173", // the local fixture site, or an origin you listed in targets.external (then also pass canaryTarget: a fixture's address)
   cases: [
     { object: myCaseObject, label: "from-my-app" }, // checked against the case schema before anything runs
     { yaml: yamlText },
@@ -101,5 +101,5 @@ node mcp/server.ts --scripted
 ## Not yet done
 
 - The MCP server has no tool for the release evidence report, and none for the kill switch's engage (a person does that on the command line, so that a name is on the audit log).
-- Only the fixture site is accepted as a target, in all three ways, until the security review of a real target is done.
+- A target is the fixture site, or an origin that a person listed with a written statement of who allows the test (`targets.external`, [external targets](external-targets.md)), in all three ways. The MCP server takes it with `--target <origin>` and starts a fixture of its own for the canary pair. The host's model cannot choose or change the target.
 - The eval suites (golden set, mutants, injection) still run on the scripted model. Running them against a live model is the next step before any pilot gate can be claimed.

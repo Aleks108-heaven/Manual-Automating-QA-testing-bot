@@ -61,6 +61,13 @@
     "apiKeySecret": null,
     "registerEntry": null
   },
+  "targets": {
+    "external": {
+      "origins": [],
+      "attestation": null,
+      "allowMutations": false
+    }
+  },
   "judge": {
     "maxAttempts": 3
   },

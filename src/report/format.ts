@@ -52,6 +52,7 @@ export function formatHeader(report: Report): string[] {
   if (missing.length > 0) out.push(`WARNING  these stamps are missing for at least one run: ${missing.join(", ")}. This report cannot show everything that produced it.`);
   if (mixed.length > 0) out.push(`NOTE     the runs disagree on: ${mixed.join(", ")}. Each case below lists its own values in the report's JSON.`);
   if (h.scripted) out.push("NOTE     a scripted fake stood in for the model or the judge. Scripted results test the machinery. They are not a language model's judgment and never fill a pilot gate.");
+  for (const note of h.notes ?? []) out.push(`TARGET   ${note}`);
   return out;
 }
 

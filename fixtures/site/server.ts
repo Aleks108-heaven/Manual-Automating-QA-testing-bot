@@ -27,6 +27,28 @@ export interface FixtureSite {
 const BUILD = "fixture-1";
 const SESSION_COOKIE = "fx_session";
 
+/** What the search page can find. Fixed, so a case can say exactly how many results a word gives. */
+const SEARCH_ITEMS = ["Blue notebook", "Red notebook", "Notebook stand", "Blue pen", "Green pencil", "Pencil case"] as const;
+
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+/** The search page: a form that sends a GET request (so the address shows the query), and the results for it. */
+function searchPage(rawQuery: string | null): string {
+  const form = `<form id="s" method="get" action="/search" role="search"><label for="q">Search</label>
+<input id="q" name="q" type="search" autocomplete="off" value="${escapeHtml(rawQuery ?? "")}">
+<button type="submit">Search</button></form>`;
+  if (rawQuery === null) return page("Search", form);
+  const query = rawQuery.trim();
+  if (query === "") return page("Search", `${form}\n<p role="alert">Enter a search term</p>`);
+  const found = SEARCH_ITEMS.filter((title) => title.toLowerCase().includes(query.toLowerCase()));
+  const shown = escapeHtml(query);
+  if (found.length === 0) return page("Search", `${form}\n<p role="status">No results for "${shown}"</p>\n<ul id="results"></ul>`);
+  const list = found.map((title) => `<li><a href="/search?q=${encodeURIComponent(title)}">${escapeHtml(title)}</a></li>`).join("");
+  return page("Search", `${form}\n<p role="status">${found.length} ${found.length === 1 ? "result" : "results"} for "${shown}"</p>\n<ul id="results">${list}</ul>`);
+}
+
 /** The password for a fixture user. Users the tests invent (through the seed endpoint) share one default. */
 function passwordFor(username: string): string {
   return FIXTURE_SECRETS[`${username}.password`] ?? "Correct#Pass1";
@@ -238,13 +260,16 @@ document.getElementById('ws').onclick = () => {
       case "GET /health":
         return json(res, 200, { status: "ok", build: BUILD });
 
+      case "GET /search":
+        return send(res, 200, searchPage(url.searchParams.get("q")));
+
       case "GET /":
         return send(
           res,
           200,
           page(
             "Fixture site",
-            `<ul><li><a href="/form">Newsletter form</a></li><li><a href="/login">Sign in</a></li><li><a href="/transient">Save with a toast</a></li><li><a href="/injection">Injection page</a></li></ul>`,
+            `<ul><li><a href="/form">Newsletter form</a></li><li><a href="/search">Search</a></li><li><a href="/login">Sign in</a></li><li><a href="/transient">Save with a toast</a></li><li><a href="/injection">Injection page</a></li></ul>`,
           ),
         );
 

@@ -1,0 +1,33 @@
+id: TC-SRCH-002
+title: Say so when nothing matches the search
+priority: P2
+technique: equivalence partitioning
+risk: RISK-SEARCH   # fixture risk ID
+role: none
+preconditions:
+  - The search page is available at /search
+data:
+  query: "zzz"
+steps:
+  - open /search                                     # 1
+  - fill the Search field with data.query            # 2
+  - click the Search button                          # 3
+expected:
+  - id: e1
+    after_step: 3
+    kind: text_visible
+    where: {role: status}
+    text: 'No results for "zzz"'
+    exact: true
+    description: The page says that nothing was found
+  - id: e2
+    after_step: 3
+    kind: count
+    where: {selector: "#results li"}
+    equals: 0
+    description: No item is listed
+  - id: e3
+    after_step: 3
+    kind: url
+    equals: "/search?q=zzz"
+    description: The address shows the query

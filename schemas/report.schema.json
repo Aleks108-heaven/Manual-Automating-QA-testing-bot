@@ -127,6 +127,13 @@
         },
         "scripted": {
           "type": "boolean"
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 1000
+          }
         }
       },
       "required": [

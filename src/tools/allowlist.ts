@@ -42,7 +42,8 @@ export class Allowlist {
     if (!this.schemes.has(url.protocol)) return { allowed: false, reason: `scheme ${url.protocol} is not allowed` };
     if (url.username || url.password) return { allowed: false, reason: "URLs with credentials are not allowed" };
     const host = url.hostname.toLowerCase();
-    if (ALWAYS_BLOCKED_HOSTS.has(host)) return { allowed: false, reason: `${host} is a metadata address` };
+    // "metadata.google.internal." with a final dot is the same host to a browser, so the dot does not get a name past this list.
+    if (ALWAYS_BLOCKED_HOSTS.has(host.replace(/\.+$/, ""))) return { allowed: false, reason: `${host} is a metadata address` };
     const port = effectivePort(url);
     const match = this.entries.some((e) => e.host === host && (e.port === null || e.port === port));
     return match

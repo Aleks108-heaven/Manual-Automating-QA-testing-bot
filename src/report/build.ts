@@ -280,6 +280,8 @@ export interface ReportInput {
   /** The cases that were planned. null means the plan is only the runs given, and the report says so. */
   plan: readonly PlanEntry[] | null;
   runs: readonly LoadedRun[];
+  /** Facts about the whole report: for a run on an external target, what it was and who attested that the test was allowed. */
+  notes?: readonly string[];
 }
 
 /**
@@ -360,6 +362,7 @@ export function buildReport(input: ReportInput): Report {
       complete_stamps: stamps.every((s) => s.status !== "missing"),
       preflight: { runs_after_passed_preflight: executedRecords.filter((r) => r.preflight?.ok === true).length, executed },
       scripted: executedRecords.some((r) => !r.versions.model_live || r.judge.live === false),
+      ...(input.notes && input.notes.length > 0 ? { notes: [...input.notes] } : {}),
     },
     summary: {
       planned: cases.length,

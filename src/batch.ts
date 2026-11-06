@@ -16,6 +16,7 @@ import { newReportId } from "./report/write.ts";
 import { orchestrateRun, PreflightFailedError, type CanaryMemo } from "./runner/orchestrate.ts";
 import type { TestCase } from "./schemas/case.ts";
 import type { SecretStore } from "./secrets/store.ts";
+import { externalCaseProblems, isLoopbackTarget, runAllowlist } from "./target.ts";
 
 export interface BatchEntry {
   /** Where the case came from (a file path, or a label for a case given as an object). Used to tell cases apart and shown in the report. */
@@ -35,6 +36,10 @@ export interface BatchOptions {
   /** Sources that did not validate, with the reason. They count as planned and not executed. */
   invalid?: ReadonlyMap<string, string>;
   targetOrigin: string;
+  /** What the target is (from assertTarget). Without it the target is taken to be the fixture site. */
+  target?: { kind: "fixture" | "external"; note: string };
+  /** Required for an external target: a fixture site where the canary pair runs, because the canary must never run on an external target. */
+  canaryTargetOrigin?: string;
   config: Config;
   secrets: SecretStore;
   provider: ProviderStatus;
@@ -53,7 +58,17 @@ export interface BatchResult {
 }
 
 export async function runBatch(options: BatchOptions): Promise<BatchResult> {
-  const { config, targetOrigin } = options;
+  const { targetOrigin } = options;
+  // A target that nobody checked with assertTarget is taken to be the fixture, and the fixture is on this machine. Anything else is refused,
+  // so a host that calls runBatch directly cannot point it at another site by leaving the target out.
+  // (A batch with nothing to run has no target to check: every case file was invalid, and the report just lists them.)
+  if (!options.target && options.entries.length > 0 && !isLoopbackTarget(targetOrigin)) {
+    throw new Error("runBatch needs the result of assertTarget for a target that is not on this machine. QaBot.run does that.");
+  }
+  // The allowlist of these runs is worked out from the target: an external run reaches the listed origins and nothing else, and a fixture run
+  // never reaches an external origin.
+  const config: Config = structuredClone(options.config);
+  config.allowlist.hosts = runAllowlist(options.config, options.target?.kind ?? "fixture");
   const runDirs = new Map<string, string>();
   const notRun = new Map<string, string>();
   let stopped: string | null = null;
@@ -61,11 +76,23 @@ export async function runBatch(options: BatchOptions): Promise<BatchResult> {
   // The canary pair is run once for the batch, before its first case. A case later in the batch reuses the result, and every other
   // pre-flight check (the kill switch, the provider, the target, the build) still runs for each case.
   const canaryMemo: CanaryMemo = new Map();
+  const external = options.target?.kind === "external";
+  if (external && !options.canaryTargetOrigin) {
+    throw new Error("An external target needs a fixture site for the canary pair (canaryTargetOrigin). The canary cases send requests that change state, and they must never run on an external target.");
+  }
   for (const entry of options.entries) {
     const id = entry.testCase.id;
     if (stopped !== null) {
       notRun.set(id, `not started, because ${stopped}`);
       continue;
+    }
+    // A case that is not safe on someone's real site is not run there. It is listed as not executed, with the reasons, and the rest of the batch runs.
+    if (external) {
+      const problems = externalCaseProblems(entry.testCase, config);
+      if (problems.length > 0) {
+        notRun.set(id, `not run on an external target: ${problems.join("; ")}`);
+        continue;
+      }
     }
     try {
       const { runDir, preflight } = await orchestrateRun({
@@ -77,8 +104,13 @@ export async function runBatch(options: BatchOptions): Promise<BatchResult> {
         modelFor: entry.modelFor,
         ...(entry.judge ? { judge: entry.judge } : {}),
         provider: options.provider,
-        killSwitch: options.killSwitchFor ? options.killSwitchFor() : new KillSwitch({ config, targetOrigin }),
+        // The kill switch's revoke calls are for the fixture. They are never sent to an external target.
+        killSwitch: options.killSwitchFor ? options.killSwitchFor() : new KillSwitch({ config, targetOrigin: options.canaryTargetOrigin ?? targetOrigin }),
         canaryMemo,
+        ...(options.target ? { target: options.target } : {}),
+        ...(options.canaryTargetOrigin ? { canaryTargetOrigin: options.canaryTargetOrigin } : {}),
+        // Nothing is asked of an external site except what the case's steps send: no /health request before or after the run.
+        ...(external ? { buildProbe: async () => ({ ok: false, build: null }) } : {}),
       });
       runDirs.set(id, runDir);
       if (!printedPreflight) options.onPreflightPassed?.(preflight);
@@ -112,6 +144,8 @@ export async function runBatch(options: BatchOptions): Promise<BatchResult> {
       ...(e.control ? { control: e.control } : {}),
     };
   });
-  const report = buildReport({ reportId: newReportId(), generatedAt: new Date().toISOString(), plan, runs: [...runDirs.values()].map((dir) => loadRun(dir)) });
+  // A report of a run on an external target says what the target was and who attested that the test was allowed, in its header.
+  const notes = external && options.target ? [options.target.note] : [];
+  const report = buildReport({ reportId: newReportId(), generatedAt: new Date().toISOString(), plan, runs: [...runDirs.values()].map((dir) => loadRun(dir)), notes });
   return { report, runDirs };
 }

@@ -43,6 +43,13 @@ export interface OrchestrateOptions {
    * the result (every other check still runs for each case). Without a memo every run makes its own canary runs.
    */
   canaryMemo?: CanaryMemo;
+  /** What is being tested. For an external target, its note (who attested to it) goes into the pre-flight report. */
+  target?: { kind: "fixture" | "external"; note: string };
+  /**
+   * Where the canary pair runs, when that is not the target. The canary cases are written for the fixture site and send requests that change
+   * state, so they must never run on an external target: an external target needs a fixture site for them.
+   */
+  canaryTargetOrigin?: string;
 }
 
 /** The verdict of each canary run made so far in one batch, by the canary's content. A canary that was changed is a different canary. */
@@ -55,12 +62,21 @@ export async function preflightFor(
   const purpose = options.purpose ?? "run";
   const { config, targetOrigin } = options;
   const probe = options.buildProbe ?? defaultBuildProbe;
+  if (options.target?.kind === "external" && !options.canaryTargetOrigin) {
+    throw new Error("An external target needs a fixture site for the canary pair (canaryTargetOrigin). The canary cases send requests that change state, and they must never run on an external target.");
+  }
   // The canaries run in their own folder so they do not mix with real runs.
   const canaryConfig: Config = structuredClone(config);
   canaryConfig.runs.directory = join(config.runs.directory, "canary");
+  // They run on the fixture site, which the browser may reach on its own; the external origins are not for them.
+  const canaryOrigin = options.canaryTargetOrigin ?? targetOrigin;
+  if (options.canaryTargetOrigin) canaryConfig.allowlist.hosts = [];
+  const canaryProbe = options.canaryTargetOrigin ? defaultBuildProbe : probe;
   let reused = false;
   const report = await runPreflight({
     canaryNote: () => (reused ? " (the canary pair ran earlier in this batch, so its result is reused)" : ""),
+    ...(options.target ? { target: options.target } : {}),
+    ...(options.canaryTargetOrigin ? { sessionsOrigin: options.canaryTargetOrigin } : {}),
     config,
     targetOrigin,
     pause: options.killSwitch,
@@ -80,11 +96,11 @@ export async function preflightFor(
         await runCase({
           testCase: canary,
           caseSource: "canary",
-          targetOrigin,
+          targetOrigin: canaryOrigin,
           model: options.modelFor(canary),
           config: canaryConfig,
           secrets: options.secrets,
-          buildProbe: probe,
+          buildProbe: canaryProbe,
           // A check made to resume the kill switch has to run canaries while the switch is still engaged.
           ...(purpose === "resume" ? {} : { pause: options.killSwitch }),
         })

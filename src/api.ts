@@ -23,7 +23,7 @@ import type { Report } from "./report/schema.ts";
 import { writeReport } from "./report/write.ts";
 import type { TestCase } from "./schemas/case.ts";
 import { EnvSecretStore, type SecretStore } from "./secrets/store.ts";
-import { assertFixtureTarget } from "./target.ts";
+import { assertFixtureTarget, assertTarget } from "./target.ts";
 
 /** One case, given as a file, as YAML text, or as an object that is checked against the case schema before anything runs. */
 export type CaseSource = { file: string } | { yaml: string; label?: string } | { object: unknown; label?: string };
@@ -49,8 +49,13 @@ export interface QaBotOptions {
 }
 
 export interface RunRequest {
-  /** The fixture site's address. Any other target is refused. */
+  /**
+   * The fixture site's address, or an origin that a person listed in config targets.external.origins (with an attestation of who owns
+   * the site or allows the test). Any other target is refused.
+   */
   target: string;
+  /** Required for an external target: the address of a local fixture site, where the canary pair runs (it must never run on an external target). */
+  canaryTarget?: string;
   cases: readonly CaseSource[];
   /** Run each case as its negative control: one expected result made wrong, so the bot must report FAIL. */
   negativeControl?: boolean;
@@ -148,7 +153,25 @@ export class QaBot {
   }
 
   async run(request: RunRequest): Promise<RunOutcome> {
-    const targetOrigin = await assertFixtureTarget(request.target);
+    // The local fixture site, or an origin that a person listed in targets.external.origins with an attestation. Nothing else.
+    const resolved = await assertTarget(request.target, this.config);
+    const targetOrigin = resolved.origin;
+    // The canary pair is written for the fixture and changes state, so on an external target it runs on a fixture site of its own.
+    let canaryTargetOrigin: string | undefined;
+    if (resolved.kind === "external") {
+      if (!request.canaryTarget) throw new Error("An external target needs canaryTarget: the address of a local fixture site where the canary pair runs.");
+      // Checked before anything is sent: the canary pair changes state, so it must never be pointed at the target or at any listed origin.
+      let asked: string;
+      try {
+        asked = new URL(request.canaryTarget).origin;
+      } catch {
+        throw new Error(`canaryTarget ${request.canaryTarget} is not a full address.`);
+      }
+      if (asked === targetOrigin || this.config.targets.external.origins.includes(asked)) {
+        throw new Error("canaryTarget must be a fixture site of its own, not the external target or any listed origin.");
+      }
+      canaryTargetOrigin = await assertFixtureTarget(request.canaryTarget);
+    }
     const order: string[] = [];
     const invalid = new Map<string, string>();
     const loaded: Array<{ source: string; testCase: TestCase; control: string | null }> = [];
@@ -184,6 +207,8 @@ export class QaBot {
       entries: loaded.map((l) => ({ source: l.source, testCase: l.testCase, control: l.control, modelFor: this.modelFor, ...(judge ? { judge } : {}) })),
       invalid,
       targetOrigin,
+      target: { kind: resolved.kind, note: resolved.note },
+      ...(canaryTargetOrigin ? { canaryTargetOrigin } : {}),
       config: this.config,
       secrets: this.secrets,
       provider: this.provider,

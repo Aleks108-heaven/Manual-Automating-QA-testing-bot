@@ -16,5 +16,5 @@ export { KillSwitch, RunnerPausedError } from "./ops/kill-switch.ts";
 export { formatReport } from "./report/format.ts";
 export type { Report } from "./report/schema.ts";
 export { EnvSecretStore, StaticSecretStore, type SecretStore } from "./secrets/store.ts";
-export { assertFixtureTarget, TargetError } from "./target.ts";
+export { assertFixtureTarget, assertTarget, externalCaseProblems, TargetError, type ResolvedTarget, type TargetKind } from "./target.ts";
 export type { TestCase } from "./schemas/case.ts";

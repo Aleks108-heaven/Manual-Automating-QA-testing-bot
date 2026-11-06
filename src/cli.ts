@@ -24,7 +24,7 @@ import { mutateExpected, negativeControl } from "./cases/mutate.ts";
 import { isLoopbackUrl, loadConfig, loadConfigForListing, loadConfigIgnoringProvider, loadConfigWith, modelChosenInEnvironment, type Config } from "./config.ts";
 import { exitCodeFor } from "./api.ts";
 import { cleanForTerminal } from "./report/sanitize.ts";
-import { assertFixtureTarget, TargetError } from "./target.ts";
+import { assertFixtureTarget, assertTarget, TargetError } from "./target.ts";
 import { runBatch } from "./batch.ts";
 import { createLiveProvider, createProviderHttp, type LiveProvider } from "./provider.ts";
 import type { ModelClient } from "./model/client.ts";
@@ -263,31 +263,58 @@ function printPreflight(report: PreflightReport): void {
   console.log();
 }
 
-/** Finds the target: an already running fixture (checked) or a new one. */
-async function resolveTarget(target: string | undefined, defects: string[]): Promise<{ targetOrigin: string; site: FixtureSite | null }> {
+/** What `run` learns about an external target: its note for the report, and the local fixture site where the canary pair runs. */
+interface ExternalRun {
+  kind: "external";
+  note: string;
+  canaryTargetOrigin: string;
+}
+
+/**
+ * Finds the target: an already running fixture (checked) or a new one. With `config` (only `run` passes it) a target may also be an origin
+ * that a person listed in targets.external.origins with an attestation. Then a fixture site is started here for the canary pair, and
+ * `site` is that fixture, which the caller closes.
+ */
+async function resolveTarget(target: string | undefined, defects: string[], config?: Config): Promise<{ targetOrigin: string; site: FixtureSite | null; external: ExternalRun | null }> {
   if (!target) {
     const site = await startFixtureSite({ defects });
-    return { targetOrigin: site.origin, site };
+    return { targetOrigin: site.origin, site, external: null };
   }
-  // Until M5 passes and the security review is done, the only allowed target is the local fixture site. A loopback address is not
-  // enough (another local service is not the fixture), so the target must say who it is. The library and the MCP server use the same check.
+  // The only allowed targets are the local fixture site and, if a person turned it on, the origins they listed. A loopback address is not
+  // enough (another local service is not the fixture), so the target must say who it is. The library and the MCP server use the same checks.
   let targetOrigin: string;
+  let external: { kind: "external"; note: string } | null = null;
   try {
-    targetOrigin = await assertFixtureTarget(target);
+    if (config) {
+      const resolved = await assertTarget(target, config);
+      targetOrigin = resolved.origin;
+      if (resolved.kind === "external") external = { kind: "external", note: resolved.note };
+    } else {
+      targetOrigin = await assertFixtureTarget(target);
+    }
   } catch (error) {
     if (error instanceof TargetError) usage(error.message);
     throw error;
   }
-  if (defects.length > 0) {
-    const config = loadConfigIgnoringProvider();
-    await fetch(`${targetOrigin}/__test/defects`, { method: "POST", headers: { "content-type": "application/json", ...config.testApi.headers }, body: JSON.stringify({ defects }) });
+  if (external) {
+    if (defects.length > 0) usage("--defects switch on defects of the fixture site, so they cannot be used with an external target.");
+    console.log(`External target ${targetOrigin}. ${external.note}\nThe canary pair runs on a local fixture site, never on the external one.\n`);
+    const canarySite = await startFixtureSite();
+    return { targetOrigin, site: canarySite, external: { ...external, canaryTargetOrigin: canarySite.origin } };
   }
-  return { targetOrigin, site: null };
+  if (defects.length > 0) {
+    const plain = loadConfigIgnoringProvider();
+    await fetch(`${targetOrigin}/__test/defects`, { method: "POST", headers: { "content-type": "application/json", ...plain.testApi.headers }, body: JSON.stringify({ defects }) });
+  }
+  return { targetOrigin, site: null, external: null };
 }
 
 async function killSwitchCommand(action: string | undefined, v: { by?: string; reason?: string; review?: string; fix?: string; "preflight-report"?: string; "golden-report"?: string; target?: string }): Promise<number> {
   // The emergency stop does not depend on the model settings: a provider variable that is wrong must not stop it from working.
   const config = loadConfigIgnoringProvider();
+  // The revoke and restore calls (POST /__test/revoke and /__test/restore) are the fixture's. They are never sent to another system: a
+  // real system needs its own way to revoke the bot's access, which is a decision still open.
+  if (v.target && !isLoopbackUrl(v.target)) usage("The kill switch's revoke calls are for the local fixture site. They are never sent to an external system.");
   const targetOrigin = v.target ? new URL(v.target).origin : "http://127.0.0.1:4173";
   const ks = new KillSwitch({ config, targetOrigin });
   try {
@@ -372,7 +399,7 @@ async function runCommand(casePaths: string[], values: ProviderFlags & { script?
     usage((error as Error).message);
   }
   // With nothing valid to run there is no need to start the fixture site.
-  const { targetOrigin, site } = entries.length > 0 ? await resolveTarget(values.target, defects) : { targetOrigin: "", site: null };
+  const { targetOrigin, site, external } = entries.length > 0 ? await resolveTarget(values.target, defects, config) : { targetOrigin: "", site: null, external: null };
 
   try {
     const parts = await providerParts(config);
@@ -392,9 +419,10 @@ async function runCommand(casePaths: string[], values: ProviderFlags & { script?
       })),
       invalid,
       targetOrigin,
+      ...(external ? { target: { kind: external.kind, note: external.note }, canaryTargetOrigin: external.canaryTargetOrigin } : {}),
       config,
-      // The only valid target is the fixture site, whose credentials are fake.
-      secrets: new StaticSecretStore(FIXTURE_SECRETS),
+      // The fixture's credentials are fake. An external target gets none: a case that needs a secret is not run there.
+      secrets: new StaticSecretStore(external ? {} : FIXTURE_SECRETS),
       provider: parts.provider,
       onPreflightPassed: printPreflight,
       onPreflightFailed: (preflight, message) => {

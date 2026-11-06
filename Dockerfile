@@ -1,5 +1,6 @@
-# Runner image TEMPLATE. Written on 20 Oct 2026 and NOT yet built or run, because Docker was not
-# running on the machine where it was written. Verify it with scripts/container-run.ps1 before relying on it.
+# Runner image. Written on 20 Oct 2026; built and run for the first time on 6 Nov 2026 (it needed `COPY evals`).
+# It runs a case with the browser sandbox OFF (the default seccomp profile blocks the sandbox); see
+# docs/runbooks/container-runner.md for the status and for keeping the sandbox on with a seccomp profile.
 # What it is for: an ephemeral, non-root runner with no network (see docs/runbooks/container-runner.md).
 #
 # The base image is the official Playwright image for the pinned Playwright version, pinned by digest.
@@ -20,6 +21,8 @@ COPY config ./config
 COPY prompts ./prompts
 COPY cases ./cases
 COPY fixtures ./fixtures
+# src/cli.ts imports the eval suites at load time, so they have to be in the image even for a plain run.
+COPY evals ./evals
 COPY src ./src
 COPY tests/ci/scripts ./tests/ci/scripts
 

@@ -2,7 +2,7 @@
 
 This is the short path from an idea to a report. The full rules for a case are on the manual page [Writing bot-ready test cases](../manual/06-writing-bot-ready-test-cases.md); this page is about what to do, in order.
 
-**Today the bot tests only the local fixture site** (`fixtures/site`, started automatically). It will refuse any other target, by design, until the security review of a real target is done. So the cases you write now are for the fixture. The way of working is the same for a real application later.
+**By default the bot tests only the local fixture site** (`fixtures/site`, started automatically), and refuses any other target. To test a site of your own (a staging site, a dev server), you list its origin and write down who allows the test: see [testing a site of your own](external-targets.md). Cases for it are read-only, with no login. The way of working is the same for both. Good examples of a search test are `cases/TC-SRCH-001.yaml` to `003.yaml` (they run on the fixture's `/search` page).
 
 ## 1. A case is one file
 

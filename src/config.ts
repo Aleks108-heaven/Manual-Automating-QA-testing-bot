@@ -21,6 +21,108 @@ export function isRemoteModelId(id: string): boolean {
   return /[:\-]cloud$/i.test(id);
 }
 
+/** True if the text holds a control character (C0, DEL, C1) or a line or paragraph separator. The ranges are code points, so that this file holds no such character itself. */
+function hasControlCharacter(text: string): boolean {
+  for (const character of text) {
+    const code = character.codePointAt(0) ?? 0;
+    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f) || code === 0x2028 || code === 0x2029) return true;
+  }
+  return false;
+}
+
+/** An IP address that is not a public one: private ranges, link-local (cloud metadata lives there), carrier-grade NAT, multicast, "this host". */
+function isPrivateAddress(hostname: string): boolean {
+  const h = hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
+  if (v4) {
+    const a = Number(v4[1]);
+    const b = Number(v4[2]);
+    return a === 0 || a === 10 || a === 127 || (a === 100 && b >= 64 && b <= 127) || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || a >= 224;
+  }
+  if (h.includes(":")) return !isPublicIpv6(h);
+  return false;
+}
+
+/**
+ * True only for global unicast IPv6 (2000::/3). Everything else is refused: loopback, unique-local, link-local, site-local, multicast, the
+ * IPv4-compatible and IPv4-mapped forms, and NAT64 all embed or reach addresses that are not public. 6to4 (2002::/16) and Teredo (2001:0::/32)
+ * embed an IPv4 address, so they are refused as well.
+ */
+function isPublicIpv6(h: string): boolean {
+  const groups = h.split(":");
+  const first = groups[0] ?? "";
+  if (first === "") return false;
+  const n = Number.parseInt(first, 16);
+  if (!Number.isFinite(n) || n < 0x2000 || n > 0x3fff) return false;
+  if (n === 0x2002) return false;
+  if (n === 0x2001 && Number.parseInt(groups[1] || "0", 16) === 0) return false;
+  return true;
+}
+
+/** Why an origin cannot be an external target, or null if it can. A target is an origin only (scheme, host, port), and is https unless it is on this machine. */
+export function externalOriginProblem(origin: string): string | null {
+  let u: URL;
+  try {
+    u = new URL(origin);
+  } catch {
+    return `${origin} is not a full origin such as https://shop.example.com`;
+  }
+  if (u.username || u.password) return "an origin may not carry a user name or password";
+  if (u.pathname !== "/" || u.search || u.hash) return "an origin has no path, query or fragment (the case's steps say which pages to open)";
+  if (origin.includes("*")) return "an origin may not hold a wildcard";
+  if (isLoopbackUrl(u.origin)) return u.protocol === "http:" || u.protocol === "https:" ? null : "an origin must be http or https";
+  if (u.protocol !== "https:") return "an origin that is not on this machine must be https";
+  const host = u.hostname.toLowerCase();
+  // Names that the browser or the system treats as local, or that cannot be a public site: refused without resolving them.
+  if (host.endsWith(".")) return "a host name may not end with a dot";
+  if (!host.startsWith("[") && !/^\d+\.\d+\.\d+\.\d+$/.test(host)) {
+    if (!host.includes(".")) return "a host name needs a full domain (a name with no dot is a local name)";
+    if (/\.(localhost|local|localdomain|internal|intranet|lan|corp|home\.arpa)$/.test(host)) return `${host} ends with a name that is local or private (.localhost, .local, .internal, .lan and the like), so it cannot be an external target; a site on this machine is allowed only as localhost or 127.0.0.1`;
+  }
+  if (isPrivateAddress(u.hostname)) return `${u.hostname} is a private, link-local or reserved address; an external target must be a public one (an address on this machine is allowed only as localhost or 127.0.0.1)`;
+  return null;
+}
+
+/** The allowlist entry for an origin: host and port, with the port that the scheme implies when the address has none, so that no other port of the host is allowed. */
+export function allowlistEntryFor(origin: string): string {
+  const u = new URL(origin);
+  return `${u.hostname}:${u.port || (u.protocol === "https:" ? "443" : "80")}`.replace(/^([0-9a-f:]+):(\d+)$/i, (m, host: string, port: string) => (host.includes(":") ? `[${host}]:${port}` : m));
+}
+
+// Targets other than the local fixture site (manual: Guardrails and security rules, "Targets"). Off unless a person lists the origins
+// AND writes down who says the bot may test them. The code cannot check that statement: it records it and shows it in the pre-flight
+// report. The default is empty, so the bot tests the fixture only.
+const ExternalTargetsSchema = z
+  .strictObject({
+    // The exact origins (https://host or https://host:port; http only on this machine). The target of a run must be one of them, and the
+    // browser may reach only these (a page's images and scripts from another host are blocked, and list that host here if the page needs it).
+    origins: z.array(z.string().min(1)),
+    // Who owns the site or allows the test, and where that is recorded: for example "Name Surname, owner of shop.example.com, ticket QA-12, 6 Nov 2026".
+    // One printed line: a line break or a terminal control character in it could hide or forge lines of a report.
+    attestation: z
+      .string()
+      .min(10)
+      .max(300)
+      .refine((s) => !hasControlCharacter(s), "the attestation must be one line of printable text (no line break, no control character)")
+      .nullable(),
+    // Cases for an external target are read-only unless this is true: a case that declares allowed_mutations is refused.
+    allowMutations: z.boolean(),
+  })
+  .superRefine((t, ctx) => {
+    t.origins.forEach((origin, i) => {
+      const problem = externalOriginProblem(origin);
+      if (problem) ctx.addIssue({ code: "custom", path: ["origins", i], message: problem });
+    });
+    if (t.origins.length > 0 && t.attestation === null) {
+      ctx.addIssue({ code: "custom", path: ["attestation"], message: "origins are listed, so attestation must say who owns the site or allows the test, and where that is recorded" });
+    }
+  });
+
+/** True when a person has listed origins and attested to them. */
+export function externalTargetsEnabled(external: { origins: readonly string[]; attestation: string | null }): boolean {
+  return external.origins.length > 0 && external.attestation !== null;
+}
+
 // The model provider (manual: Data handling rules, "Provider register"; build brief: LLM provider and model). "scripted" is the
 // fake model of the CI tests. "openai-compatible" is any server that answers POST {baseUrl}/chat/completions, which covers
 // LM Studio, Ollama, llama.cpp and vLLM. The model is chosen by name from what the server lists (`provider models`).
@@ -149,6 +251,7 @@ const ConfigSchema = z.strictObject({
     maxFindings: z.number().int().min(1),
   }),
   provider: ProviderSchema,
+  targets: z.strictObject({ external: ExternalTargetsSchema }),
   // How many times the judge is asked when its answer fails validation.
   judge: z.strictObject({ maxAttempts: z.number().int().min(1).max(10) }),
   // How many times the model is asked for its final report when the report fails validation.
@@ -309,17 +412,20 @@ export function configHash(config: Config): string {
  *   QA_PROVIDER_CONTEXT         provider.contextTokens, the context length set on the model server
  *   QA_PROVIDER_TIMEOUT_MS      provider.requestTimeoutMs
  *   QA_MAX_WALL_MS              budgets.maxWallMs, the time one run may take
+ *   QA_EXTERNAL_ORIGINS         comma-separated origins the bot may test besides the fixture (targets.external.origins)
+ *   QA_EXTERNAL_ATTESTATION     who owns those sites or allows the test, and where that is recorded (targets.external.attestation)
+ *   QA_EXTERNAL_ALLOW_MUTATIONS=1  let cases for an external target declare allowed_mutations (targets.external.allowMutations)
  *   QA_BROWSER_CHANNEL          chromium (default), chrome, chrome-dev, chrome-canary, msedge, msedge-dev, ... (browser.channel)
  *   QA_BROWSER_HEADED=1         show the browser window (to watch a run)
  *   QA_BROWSER_SLOWMO_MS        pause between browser actions, in milliseconds
  */
 /**
- * The configuration for a command that has nothing to do with a model (the kill switch, reports, the release report, the eval suites,
- * the golden set). It ignores every QA_PROVIDER* variable, so a provider setting that is wrong cannot stop the emergency stop or a
- * report from working.
+ * The configuration for a command that has nothing to do with a model or an external target (the kill switch, reports, the release report,
+ * the eval suites, the golden set, the case checker). It ignores every QA_PROVIDER* and QA_EXTERNAL* variable, so a setting that is wrong
+ * cannot stop the emergency stop or a report from working, and these commands never see an external target.
  */
 export function loadConfigIgnoringProvider(path = "config/default.json"): Config {
-  return loadConfig(path, Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith("QA_PROVIDER"))));
+  return loadConfig(path, Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith("QA_PROVIDER") && !name.startsWith("QA_EXTERNAL"))));
 }
 
 /** The configuration for listing a server's models, which has to work before a model is chosen: the kind and the model names are ignored, the address is not. */
@@ -364,6 +470,10 @@ export function loadConfig(path = "config/default.json", env: NodeJS.ProcessEnv 
   if (env["QA_PROVIDER_CONTEXT"]) config.provider.contextTokens = Number(env["QA_PROVIDER_CONTEXT"]);
   if (env["QA_PROVIDER_TIMEOUT_MS"]) config.provider.requestTimeoutMs = Number(env["QA_PROVIDER_TIMEOUT_MS"]);
   if (env["QA_MAX_WALL_MS"]) config.budgets.maxWallMs = Number(env["QA_MAX_WALL_MS"]);
+  const externalOrigins = (env["QA_EXTERNAL_ORIGINS"] ?? "").split(",").map((o) => o.trim()).filter(Boolean);
+  if (externalOrigins.length > 0) config.targets.external.origins = externalOrigins;
+  if (env["QA_EXTERNAL_ATTESTATION"]?.trim()) config.targets.external.attestation = env["QA_EXTERNAL_ATTESTATION"].trim();
+  if (env["QA_EXTERNAL_ALLOW_MUTATIONS"] === "1") config.targets.external.allowMutations = true;
   if (env["QA_BROWSER_CHANNEL"]) config.browser.channel = env["QA_BROWSER_CHANNEL"] as typeof config.browser.channel;
   if (env["QA_BROWSER_HEADED"] === "1") config.browser.headed = true;
   if (env["QA_BROWSER_SLOWMO_MS"]) config.browser.slowMoMs = Number(env["QA_BROWSER_SLOWMO_MS"]);
@@ -372,7 +482,14 @@ export function loadConfig(path = "config/default.json", env: NodeJS.ProcessEnv 
   config.sessions.directory = config.sessions.directory.replace("${TMPDIR}", tmpdir());
   config.killSwitch.stateFile = config.killSwitch.stateFile.replace("${RUNS}", config.runs.directory);
   config.killSwitch.auditLog = config.killSwitch.auditLog.replace("${RUNS}", config.runs.directory);
+  // An origin is kept in its normal form (lower-case host, no trailing slash), so that two spellings of one origin are one origin.
+  // Only an origin that passes the rules is normalized. One with a path, a user name or another fault is left as it was written, so that the
+  // schema below names the fault: normalizing first would drop the path or the password and accept the rest without a word.
+  config.targets.external.origins = [...new Set(config.targets.external.origins.map((o) => (externalOriginProblem(o) === null ? new URL(o).origin : o)))];
   const checked = ConfigSchema.parse(config);
+  // The listed external origins are NOT added to allowlist.hosts here. That list is global, and a run on the fixture (or its canary pair, or
+  // an injected link) would then be able to reach the external site without any of the rules for external targets. The allowlist of a run
+  // is worked out for that run, from its target (see runAllowlist in target.ts).
   // A runner that must be the pinned container is a real environment. It may not also skip the canaries.
   if (checked.preflight.requireContainer && (!checked.preflight.requireCanaries || checked.preflight.canaryCases.length === 0)) {
     throw new Error("Invalid configuration: a configuration that requires the container runner must also require at least one canary case (preflight.requireCanaries and preflight.canaryCases).");

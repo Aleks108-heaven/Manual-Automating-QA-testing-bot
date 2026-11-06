@@ -31,6 +31,10 @@ export interface PreflightDeps {
   runCanary: (testCase: TestCase) => Promise<Verdict>;
   /** Text added to the canary check's detail when it passed, for example to say that a result from earlier in the batch was reused. */
   canaryNote?: () => string;
+  /** What is being tested. For an external target the report says so and who attested to it, and the health and build checks are skipped. */
+  target?: { kind: "fixture" | "external"; note: string };
+  /** Where a role's login is tried. For an external target this is the fixture site that the canary cases run on: a login is never sent to the external site. */
+  sessionsOrigin?: string;
   /** For tests: where the Dockerfile text comes from. */
   dockerfileText?: () => string | null;
   now?: () => Date;
@@ -149,7 +153,7 @@ export async function runPreflight(deps: PreflightDeps): Promise<PreflightReport
     const problems: string[] = [];
     for (const role of roles) {
       try {
-        const session = await establishSession({ role, config, secrets: deps.secrets, targetOrigin, runId: `preflight-${role}`, runDir: join(config.runs.directory, "preflight"), redactor });
+        const session = await establishSession({ role, config, secrets: deps.secrets, targetOrigin: deps.sessionsOrigin ?? targetOrigin, runId: `preflight-${role}`, runDir: join(config.runs.directory, "preflight"), redactor });
         session.cleanup();
       } catch (error) {
         problems.push(`role ${role}: ${error instanceof SessionError ? error.message : (error as Error).name}`);
@@ -167,14 +171,21 @@ export async function runPreflight(deps: PreflightDeps): Promise<PreflightReport
     return actual === expected ? passed("the image digest matches the Dockerfile") : failed("the image digest does not match the Dockerfile");
   });
 
+  // A target of the owner's own, not the fixture. The statement of who allows the test is recorded here, in the report that every run keeps.
+  const external = deps.target?.kind === "external";
+  if (external) await record("target is allowed", async () => passed(deps.target!.note));
+
   let probe: Awaited<ReturnType<BuildProbe>> | null = null;
   await record("target healthy", async () => {
+    // Nothing is asked of an external site before the run: it has no health endpoint of ours, and the bot sends it only what the case's steps send.
+    if (external) return skipped("an external target has no health endpoint of the bot's, and nothing is asked of it before the run");
     probe = await deps.probe(targetOrigin);
     if (!config.preflight.requireHealthEndpoint) return skipped("a health endpoint is not required in this configuration");
     return probe.ok ? passed("GET /health answered") : failed("GET /health did not answer");
   });
 
   await record("build is the expected one", async () => {
+    if (external) return skipped("an external target does not report a build of the bot's");
     if (config.preflight.expectedBuild === null) return skipped("no particular build is required");
     const build = (probe as Awaited<ReturnType<BuildProbe>> | null)?.build ?? null;
     return build === config.preflight.expectedBuild ? passed(`the target reports build ${build}`) : failed(`the target reports build ${build ?? "none"}, expected ${config.preflight.expectedBuild}`);

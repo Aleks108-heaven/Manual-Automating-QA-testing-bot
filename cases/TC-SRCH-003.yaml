@@ -1,0 +1,25 @@
+id: TC-SRCH-003
+title: Ask for a search term when the search is empty
+priority: P3
+technique: boundary value
+risk: RISK-SEARCH   # fixture risk ID
+role: none
+preconditions:
+  - The search page is available at /search
+steps:
+  - open /search                                     # 1
+  - click the Search button                          # 2
+expected:
+  - id: e1
+    after_step: 2
+    kind: text_visible
+    where: {role: alert}
+    text: "Enter a search term"
+    exact: true
+    description: The page asks for a search term
+  - id: e2
+    after_step: 2
+    kind: count
+    where: {selector: "#results li"}
+    equals: 0
+    description: No item is listed

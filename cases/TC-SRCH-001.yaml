@@ -1,0 +1,39 @@
+id: TC-SRCH-001
+title: Find items by a word in their title
+priority: P2
+technique: equivalence partitioning
+risk: RISK-SEARCH   # fixture risk ID
+role: none
+preconditions:
+  - The search page is available at /search
+data:
+  query: "notebook"
+steps:
+  - open /search                                     # 1
+  - fill the Search field with data.query            # 2
+  - click the Search button                          # 3
+expected:
+  - id: e1
+    after_step: 3
+    kind: url
+    equals: "/search?q=notebook"
+    description: The address shows the query
+  - id: e2
+    after_step: 3
+    kind: text_visible
+    where: {role: status}
+    text: '3 results for "notebook"'
+    exact: true
+    description: The number of results is shown
+  - id: e3
+    after_step: 3
+    kind: count
+    where: {selector: "#results li"}
+    equals: 3
+    description: Three items are listed
+  - id: e4
+    after_step: 3
+    kind: element_state
+    where: {role: link, name: "Red notebook"}
+    state: visible
+    description: A matching item is in the list
